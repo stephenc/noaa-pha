@@ -1,0 +1,92 @@
+c ----------------------------------------------------------------------
+C ------- Following code adaptation for Peter's Worlds ----------
+
+c      parameter (nstatparm=17)
+      
+c      character*11 iparm, statparm(nstatparm) /'NEIGH_CLOSE',
+c     *  'NEIGH_FINAL','NEIGH_CORR','MIN_STNS','SNHT_THRES',
+c     *  'BIC_PENALTY','CONFIRM','SHF_META','ADJ_EST','ADJ_FILTER',
+c     *  'ADJ_OUTLIER','ADJ_WINDOW','NS_LOOP','ADJ_MINLEN',
+c     *  'ADJ_MINPAIR','AMPLOC_PCT'/
+
+c       Number of stations in the nearest neighbor (dist) file
+c        for Peter World Tests (NEIGH_CLOSE)
+        integer ndist
+
+c       Number of network stations (including candidate!)
+c       NOTE: This variable must be coordinated with its counterpart in
+c               the inhomog.parm.incl file (NEIGH_FINAL)
+c       nstns is generated directly from nsnet in read_write.mthly.v5p.f
+        integer nsnet, nstns
+        
+c       Correlation method to determine station network (NEIGH_CORR)
+        character*5 corr_type
+        
+c       Half the Minimum number of pairwise observations per year-month
+c         for removing low-corr stations (MIN_STNS)
+        integer minstns
+        
+c       SNHT significance level (SNHT_THRES)
+c       1 = 97.5%; 5 = 95%; 10=90%
+        integer isnht
+
+c       Penalty function for Bayesian (BIC_PENALTY)
+c       bic, aic, none
+        character*4 bic_type
+
+c       Adjustment estimate filter method
+c       BICF = bic sig test per pair
+c       CONF = collective 95% conf interval of adj est dist
+c       BOTH = both BICF and CONF
+c       NONE = neither BICF or CONF
+        character*4 adjfilt
+
+c       Number indicating the hits in station pairs to confirm a chgpt 
+c       (CONFIRM) <2>,3,4,5
+        integer iconfirm
+      
+c       Toggle to use or not use Station History metadata
+c       (SHF_META) 0 = do NOT use, 1 = use
+        integer ishfmeta
+
+c       Adjustment estimate method (ADJ_EST)
+c       MED = median value
+c       QAV = average of 25% & 75% values
+c       AVG = average
+        character*3 adjest
+
+c       Toggle to remove outliers or not in Adjustment estimate
+c       (ADJ_OUTLIER) 0 = do NOT remove outliers, 1 = remove outliers
+        integer iadjout
+
+c       Number of months to average for the adjusment estimate (0 = no limit)
+c       (ADJ_WINDOW) valid values = <0>, 24, 60, 120
+        integer iadjwin
+        
+c       Toggle to remove non-significant(NS) breakpoints then merge segments 
+c          for longer segments to test (NS_LOOP)
+c       0 = do NOT remove NS breakpoints, 1 = remove NS breakpoints 
+        integer insloop
+        
+c       Percent of estimates of opposite sign to general population to 
+c         determine non-significance. NOTE: used in both Not-sig and Adj loops
+c       0 = none, 10 = 10 percent, 20 = 20 percent (NS_OPPOSITE)
+        integer insopp
+
+c       Minimum number of data values in segment to estimate adjustment
+c       (ADJ_MINLEN) valid values = <18>, 24, 36, 48
+        integer minlen
+
+c       Minimum number of station pairs to estimate adjustment
+c       (ADJ_MINPAIR) valid values = <2>, 3, 4, 5
+        integer minsta
+        
+c       Index for the "amp vs loc" percent inclusion for merging of PW hits
+c       (AMPLOC_PCT) valid values = 1 (90%), <2> (92.5%), 3 (95%)
+        integer mypct
+
+      common /statcomm/ ndist, nsnet, nstns, minstns, isnht, iconfirm,
+     *  ishfmeta, iadjout, iadjwin, insloop, insopp, minsta, mypct,
+     *  minlen, corr_type, bic_type, adjest, adjfilt
+
+ 

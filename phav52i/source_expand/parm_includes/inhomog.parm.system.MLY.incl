@@ -1,0 +1,97 @@
+C       This is the BASIC RESOURCE FILE containing parameter settings  
+c        for the inhomogeneity routines in the USHCN_2002 project
+c
+c      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+c      WARNING: THIS FILE CONTAINS PARAMETERS SET FOR MONTHLY PROCESSING
+c      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+c
+c       The mthly version revives homogeneity testing at the monthly level
+c                                               3 Nov 2004 cw
+c
+c ----------------------------------------------------------------------
+c       Parameters NOT TO BE CHANGED from project to project
+
+C       BE AWARE: THIS INCLUDE IS DEPENDENT UPON INHOMOG.PARM.INCL
+ 
+c       Total Number of years
+        parameter (numyr = endyr - begyr + 1)
+        
+c	      Total number of months including the 12
+c	      months of lead-in data that are not used
+        parameter (nmo = numyr * 12)
+
+c       Minimum number of individual months in a raw series that can be tested
+        parameter (minser = 5)
+
+C      minimum number of years for a given month
+       parameter (minann = 5)
+        
+c       minimum size of a station history (or SHF + "discovered") segments
+c        (used in alignmoves)
+        parameter (minlenshf = 24)
+        
+c       Maximum slope (degrees / month) for the sloped models
+       parameter (slpmthmax = .0225)
+
+c       If the segment has more than minlen but less than mincomp
+c         then compt is % completeness needed for estimate
+        parameter (mincomp = 60)
+        parameter (compt = .8)
+        
+c       Test statistic decisions by all of the Techniques
+        integer homog, indeter, inhomog
+        parameter (homog = 1, indeter = 2, inhomog = 3)
+
+c       Maximum number of breaks in the series
+        parameter (ninh = 80)
+        
+c       Maximum number of breaks in a sub-network
+        parameter (inhnet = 440)
+        
+c       epsilon - a very small number
+        parameter (eps = 0.000001)
+        
+c       stepthres - temperature step limit at which these models might work
+c       turned off threshold     20 May 03 cw
+        parameter (stepthres = .0)
+     
+c       Character array initialization deifinition
+        character*1 czero
+        parameter (czero = achar(0))
+        
+      integer nrange, nhss
+      parameter (nrange = 7)
+c     ---- for confirm = 2 ----
+      parameter (nhss = 11)
+
+C     --------------- V3A - PARAMETER STUDY RESULTS -----------------
+c                                                        07 mar 05 cw
+c     In the UCP algorithm, the combination of the monthly merge and
+c       the hit thresholds set in the following arrays results in
+c       ~10% FAR with close to the maximum HSS skill score.      
+c     range aplitude of est. offsets to set the monthly merge size
+      real arange(nrange)/ 0.4,0.6,0.8,1.0,1.5,3.0,5.0/
+c     monthly merge size
+c     due to the removal of the SHAP and using the Std Dev of the est
+c       amplitude, the minimum of the mrgyr == minimum statistic window
+c       see minstat from inhomog.comm.mthly.incl
+
+C     Structural Uncertainty Option - AMPLOC_PCT
+c     rearranged mrgyr into an (nrange, pct) array to use varying percents
+c       inclusion from the "amp vs location uncertainty" spread
+c     pct: 1 = 90%, 2 = 92.5%, 3 = 95% inclusion   
+      integer mrgyr(nrange, 3)/29,  12,   7,  5,  3,  2,  1,
+     *                         36,  18,  12,  8,  6,  5,  5,
+     *                         59,  23,  12,  8,  6,  5,  5/
+      
+c     ----------------- for confirm = 3 -------------------
+c     range of number of stations to set the hit threshold
+c      integer nhtstns(nhss)/ 7, 8, 9, 10, 12, 14, 16, 18, 20, 999/
+c     hit thresholds 
+c      integer nhthres(nhss)/ 3, 4, 5,  6,  8, 10, 11, 12, 13, 14/
+c     ----------------- for confirm = 2 -------------------
+c     range of number of stations to set the hit threshold
+      integer nhtstns(nhss)/ 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 999/
+c     hit thresholds for second try (betav16)
+      integer nhthres(nhss)/ 2, 2, 2, 2,  2,  2,  2, 2, 2,  2,  2 /
+      

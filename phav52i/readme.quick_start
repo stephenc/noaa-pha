@@ -1,0 +1,95 @@
+###################### Public Deployment PHA Project ########################
+#                            25 October, 2012
+#
+#       readme.quick_start is a quick guide to deploy and execute 
+#              the PHA for Monthly Temperature data using a 
+#                     BenchMark pre-packaged dataset.
+#
+# ------------------------- System Requirements -----------------------------
+# This package runs on most versions of Linux or Unix. See below for some of the
+# required components. The user should have an intermediate or advanced level 
+# knowledge of this type of operating system in case their configuration needs work.
+#
+# Scripts are Bash, Several utilities used are Gawk, Sort, and Make,
+# Source Code has been compiled with both gfortran(v4.1.2) and lf95(vL8.10b)
+#
+# For execution the example requires 400Mb for your-run-directory
+#      and about 3.6Gb RAM + 3.8Gb Virtual memory 
+#      and an hour for execution at 2.9GHz
+# To fully expand the phav52i_results file requires another 400Mb
+# 
+
+# ------------------- Install and Run the Test Package ----------------------
+#
+# The User must be able to create and use two directories:
+# your-source-directory - destination of the source codes and the benchmark data
+# your-run-directory - destination of "make install"
+#
+# For instance if:
+# your-source-directory is ~/pha_src
+# your-run-directory is ~/pha_v52i
+
+# 1) Untar/gunzip the phav52i.tar.gz in your-source-directory
+cd ~/pha_src
+tar -xzf phav52i.tar.gz
+# This will make a subdirectory 
+# NOTE: Do not untar the testdata/benchmark.tar.gz - 
+#       the next step will do this into your-run-directory
+
+# 2) Install current PHAv52i test:
+cd phav52i
+make install
+# NOTE: You can change the place to install the Project with
+#  make install INSTALLDIR=~/your-run-directory
+# NOTE: If the MAKE errors for any reason, then the test package will not work.
+  
+# 3) Execute the test package
+cd ~/pha_v52i (or your-run-directory)
+nohup ./testv52i-pha.sh world1 tavg raw 0 0 P > runlogs/testv52i-pha.log &
+
+# 4) To check the execution, you may download the data results from our run
+#  Download the phav52i_results.tar.gz and:
+tar -xzf phav52i_results.tar.gz
+# This will expand into a ./data-results directory containing our results
+#   including all of the data files and the output logs
+   
+# -------------------- How to Modify Code for a New Dataset -------------------
+#
+# ---- Station list and Data files
+# A New Dataset must have at least a Station List and a Data Files. At a minimum, the
+# Station List defines the Station ID/Latitude/Longitude. The Data Files (one for
+# each station/element - see data/benchmark/world1/monthly/raw) defines all 
+# of the Monthly Temperatures in Annual Records. All files are in the GHCNMv3 format.
+# For station list and metadata examples, see:
+#      pha_v52i/data/benchmark/world1/meta 
+# For station data files, see:
+#      pha_v52i/data/benchmark/world1/monthly/raw
+#
+# ---- Data Configuration file
+# The scripts use a configuration file to define custom information for the incoming
+# dataset. See:
+#      pha_v52i/data/world1.conf
+# 
+# ---- Source code changes
+# Also, several parameters need to be set for the proper compilation of the source
+# codes. Go to your-source-directory that contains the PHAv52i scripts and codes and
+# go down into source_expand/parm_includes directory.
+#
+# Edit: inhomog.parm.MTHLY.TEST.incl
+# Modify the begin and end year, number of stations, number of neighbors, and 
+#   missing data definition as needed.
+#
+# DO NOT EDIT: inhomog.parm.system.MLY.incl
+
+############################################################################
+#                       Everything else is just narative
+#
+# NOTE: Current code was developed and used on LINUX RedHat EL4 and RHEL5
+#   servers. Has also been successfully run on UBUNTU Hardy Heron machines.
+#
+# NOTE: All of the shell commands used in the documentation and some of the 
+#   scripts are BASH (.sh extension). Some of the older scripts are CSH 
+#   (.csh extension).
+#
+# NOTE: The all of the text files are simply ASCII.
+

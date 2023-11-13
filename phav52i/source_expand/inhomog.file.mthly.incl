@@ -1,0 +1,11 @@
+C       This is a resource file containing directory and filename settings for
+c         inhomogeneity routines in the USHCN_2002 project
+c
+c       directory path to 
+c         1) the durbin-watson statistic files for LV
+c         2) the t-statistic files for MLR
+c
+      character*132 sfile_dir
+      parameter(sfile_dir=
+     *   '/home/cwilliam/stat_files')
+        
