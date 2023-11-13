@@ -1,0 +1,5 @@
+== NOAA implementation of the pairwise method of Menne and Williams (2009)
+
+This is my attempt to make the implementation from link:ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/v3/software/52i/phav52i.tar.gz[ftp.ncdc.noaa.gov] generally usable by others.
+
+For changes added by me, see the GIT history!
