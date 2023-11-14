@@ -23,11 +23,11 @@ N just UCP & Fill
 --
 +
 |===
-|Process a|`I` a|`P` a|`N`|
+|Process a|`I` a|`P` a|`N`
 
-|Parse & Convert|Y|-|-|
-|Dist & Corr|Y|Y|-|
-|UCP & Fill|Y|Y|Y|
+|Parse & Convert|Y|-|-
+|Dist & Corr|Y|Y|-
+|UCP & Fill|Y|Y|Y
 |===
 
 === Building and Running
