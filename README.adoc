@@ -19,7 +19,7 @@ From the link:./phav52i/scripts/combo_runs/run_test.sh[run_tests.sh] script, the
 --
 `I`:: parses & converts GHCNMv2 meta/data, dist & corr, UCP & Fill
 `P`:: regenerates the dist & corr, UCP & Fill
-N just UCP & Fill
+`N`:: just UCP & Fill
 --
 +
 |===
