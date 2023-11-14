@@ -10,16 +10,18 @@ RUN yum install -y curl gcc gcc-c++ gfortran \
                    yum-utils && \
     yum clean all && rm -rf /var/cache
 
-RUN useradd user -u 1000 -m -G users,wheel && \
-    echo "user ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers && \
-    chown -R user:user /home/user
+ARG username
 
-USER user
+RUN useradd ${username:-cwilliam} -u 1000 -m -G users,wheel && \
+    echo "${username:-cwilliam} ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    chown -R ${username:-cwilliam}:${username:-cwilliam} /home/cwilliam
 
-COPY --chown=1000:1000 . /home/user
+USER ${username:-cwilliam}
 
-WORKDIR /home/user
+COPY --chown=1000:1000 . /home/${username:-cwilliam}
 
 RUN set -ex ; \
-   cd phav52i ; \
+   cd $HOME/phav52i ; \
    make install
+
+WORKDIR /home/${username:-cwilliam}/pha_v52i

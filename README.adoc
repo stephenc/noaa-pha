@@ -3,3 +3,30 @@
 This is my attempt to make the implementation from link:ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/v3/software/52i/phav52i.tar.gz[ftp.ncdc.noaa.gov] generally usable by others.
 
 For changes added by me, see the GIT history!
+
+
+=== Inferred documentation
+
+From the link:./phav52i/scripts/combo_runs/run_test.sh[run_tests.sh] script, the command line arguments are, in order:
+
+. the data ID for the current test run (world6, us120217, etc.)
+. the element (tmax/tmin/tavg)
+. the process level (raw/tob)
+. the first combo to process
+. the last combo to process
+. `I` or `P` or `N` processing options
++
+--
+`I`:: parses & converts GHCNMv2 meta/data, dist & corr, UCP & Fill
+`P`:: regenerates the dist & corr, UCP & Fill
+N just UCP & Fill
+--
++
+|===
+|Process a|`I` a|`P` a|`N`|
+
+|Parse & Convert|Y|-|-|
+|Dist & Corr|Y|Y|-|
+|UCP & Fill|Y|Y|Y|
+|===
+

@@ -91,7 +91,7 @@ if [ $lf95opt == 1 ]
     SHAPinp.v7c.for read_write.mthly.v6b.for acovf.for \
     skyline.v1.for -o $bin/$binfile 2> lf95.err
 else    
-  gfortran $dopt $copt -mcmodel=medium restart.skymod.f95 confirmdisp.skymod.f95 \
+  gfortran $dopt $copt -fno-sign-zero -mcmodel=medium restart.skymod.f95 confirmdisp.skymod.f95 \
     ucpmonthly.v25d.for splitmerge.v22b.for chgptmodels.v7a.for \
     SHAPinp.v7c.for read_write.mthly.v6b.for acovf.for \
     skyline.v1.for -o $bin/$binfile 2> lf95.err
