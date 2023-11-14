@@ -30,3 +30,20 @@ N just UCP & Fill
 |UCP & Fill|Y|Y|Y|
 |===
 
+=== Building and Running
+
+Build with docker, e.g.
+
+[source,shell]
+----
+$ docker build --tag noaa-pha:latest .
+----
+
+When running, it is recommended to bind mount the output directory to get the data locally, e.g.
+
+.Running the Peter's world test data set
+[source,shell]
+----
+$ docker run --rm -ti -v "$(pwd)/data/output:/home/cwilliam/pha_v52i/data/output" noaa-pha:latest \
+  sh -c './testv52i-pha.sh world1 tavg raw 0 0 P | tee > runlogs/testv52i-pha.log'
+----
