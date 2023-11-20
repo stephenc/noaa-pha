@@ -465,9 +465,10 @@ C               DETERMINE IF PRECIPITATION VALUE SHOULD BE 0.
                   DO 130 III = 1,IOPIK
 c                   Fix Error in ROUTINE - when the algorithm was developed
 c                     (post cw) ioptb and iopta were reversed! cw 10aug01
-                    DO 130 JJJ = LY-IOPTB+1,LY+IOPTA
+                    DO 1301 JJJ = LY-IOPTB+1,LY+IOPTA
                       IF(DELM(IOPSRT(III),JJJ,im) .EQ. 0.0)
      *                  PCPCNT=PCPCNT+1
+ 1301               CONTINUE
   130             CONTINUE
                   IF((2*PCPCNT) .GT. (IOPIK*(IOPTB+IOPTA)))
      *              cdata(im, ly) = 0. 
@@ -1399,10 +1400,11 @@ C     INITIALIZE VARIABLES
       ISD = 0
 
       DO 10 IW1 = 1,iBN
-        DO 10 IW2 = 1,iBN
+        DO 1010 IW2 = 1,iBN
           ISD = ISD + 1
           XSDIF(ISD) = XKY(IW2) / XJY(IW1)
 c          tsdif(isd) = xsdif(isd)
+ 1010   CONTINUE
    10 CONTINUE
 
 C     SORT RATIOS FROM LOWEST TO HIGHEST
