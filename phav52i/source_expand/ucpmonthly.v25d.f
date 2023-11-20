@@ -711,7 +711,8 @@ c       first and last target station skyline indices for common years
 c       first and last neighbor station skyline indices for common years
       integer ippha1, ippha2
       common /skycomm/ iphayr1, iphayr2, itpha1, itpha2, ippha1, ippha2
-
+	logical valent
+      call subpon(" ============ UCPMONTHLY entry  ", 436, 0)
 c     netloop enables(=1)/disables(=0) network looping after candidate chgpts identified
       netloop = 0
       
@@ -775,7 +776,9 @@ c        open (unit=mounit,file=isfile)
 
 c     ---------------------------------------------------------------------
 c     Open Candidate stations meta file to process
+      call subpon(" ============ UCPMONTHLY openA  ", 436, 2)
       open(nnunit, FILE=netfile(1:lnblnk(netfile)), err=200)
+      call subpon(" ============ UCPMONTHLY openB  ", 436, 2)
       if(mattdata .ne. '') then
         open(rnunit, FILE=mattdata(1:lnblnk(mattdata)), err = 210)  
       endif  
@@ -838,14 +841,20 @@ c         initialize paired network index
 c       Read in one complete network - all candidates and their neighborhoods
 c       nhits is used to set a chgpt at any gap in the data > minlen 
 c         contiguous months.                                  22Sep05
+        call subpon(" ============ UCPMONTHLY openC  ", 436, 2)
         call readnet(mmunit,nnunit,idunit,rnunit,intr,ieof,ntstn)
-        if(ieof .ne. 0) goto 999
+        call subpon(" ============ UCPMONTHLY openD  ", 436, 2)
+        write(436, *) " === UCPMONTHLY ieof ", ieof
+        if(ieof .ne. 0) go to 999
         network = network + 1
 c       if restart has been initiated read input up to the restart network
         if(rsnet .gt. network) go to 10
 c       only process networks between first and last
         if(firstnet.ne.0 .or. lastnet.ne.0) print *,'Network:',network
         if(network .lt. firstnet) go to 10
+        	
+        if(network .gt. lastnet) write(436, *) " network .gt. lastnet ", 
+     1   network, " ", lastnet
         if(network .gt. lastnet) go to 999
 
 c       If past the restart network, then initialize restart arrays
@@ -870,7 +879,9 @@ c         fill the sahist array with station history data
 c          (sahist is not initialized in read_hist)
           print *,' ihyear, ishfmeta', ihyear, ishfmeta
           if(ihyear .le. 0 .and. ishfmeta .ne. 0) then
-            call read_hist(mmunit,mounit,ntstn,mmdates)
+                print *, " $%^3A read_hist IN"
+            call read_hist(mmunit,mounit,ntstn,mmdates, valent)
+		print *, " $%^3B read_hist OUT"
 c           adjust for MMTS as in USHCN v1
             if(immts .eq. 1) then
               call mmts_adj(mmdates)
@@ -1286,7 +1297,7 @@ c >>>>  CRITICAL point for restart - come here if rentry == 3
 
 c       using the nhits output of the first confirmfilt call, estimate
 c         the amplitude of the changepoints
-        call estamt(ntstn,idunit)
+        call estamt(ntstn,idunit, valent)
         
 c        write out the results - 
 c     BEWARE !!!!!! ONLY USED WITH read_write.mthly.v2a.f !!!!!!
@@ -1310,22 +1321,48 @@ c     close plotting data unit
       deallocate(zchgpt)
       deallocate(nchgpt)
       deallocate(ntest)
+      call subpon(" ============ UCPMONTHLY exit   ", 436, 1)
       go to 999
 
 c     -----------------------------------------------------------
 c     input/output errors
   200 print *,' Cannot open candidate-network file:', netfile
+      write (436, *) ' Cannot open candidate-network file:', netfile
       stop 1
 
   210 print *,' Cannot open Matt data file:', mattdata
+      write (436, *) ' Cannot open Matt data file:', mattdata
       stop 1
 
   215 print *,' Cannot open Matt meta file:', mattmeta
+      write (436, *) ' Cannot open Matt meta file:', mattmeta
       stop 1
 
   999 end
      
-     
+      subroutine subpon(txt, iu, iw)
+      character*32 txt
+      character*24 greeting
+      call fdate( greeting )
+      print *, txt, " p ", greeting
+      write(*, *) txt, " * ", greeting
+      write(6, *) txt, " 6 ", greeting
+      if (iw .eq. 0) then
+        open(iu, FILE = '~/ponfile6.txt', STATUS = 'old', ERR = 150)
+        write(iu, 1) greeting, " 4 ", txt
+      endif
+      if (iw .eq. 1) then
+        write(iu, 1) greeting, " 4 ", txt
+        close(iu)
+      endif
+      if (iw .gt. 1) then
+        write(iu, 1) greeting, " 4 ", txt
+      endif
+    1 format(1x, A, A, A)
+      go to 160
+  150 print *, txt, " OPEN ERROR ", iu, " ", greeting
+  160 return
+      end
 c     =======================================================================
 c      subroutine statsubs(itarg, it2pair, ipair, ip2targ, idunit,
 c     *   rrtemp, rrflg, rrstn)
@@ -2871,7 +2908,7 @@ c        imo = (iy-begyr-1)*12 + im
       
 c =======================================================================
 
-      subroutine estamt(ntstn,idunit)
+      subroutine estamt(ntstn,idunit, valent)
       
 c     A major rework was accomplished on 07 Sept. 06
 c       The major steps in determining the best adjustment value
@@ -3017,6 +3054,7 @@ c      integer iadjlist(npass)/minsta/
 c      integer iadjlen(npass)/minlen/
 
       character*13 tstr
+	logical valent
 
       maxskymo = 12 * maxsky
 c     Allocate the estamt work arrays
@@ -3365,6 +3403,12 @@ c          if(iedebug .ge. 1 .and. istep .gt. 2) then
                 if(iedebug .ge. 0) then
                   call iskymo2iym(iy,im,iskymo,itsky1,ityr1)
                   write(6,'(i3,i5,1x,a," Estamt chgin: ",2i5,i2.2,i8,
+     *              2i6,2f7.2,i5,2f7.3)')
+     *              ipass, itarg, ntstn(itarg), ichg,
+     *              iy, im, iskymo, nhits(iskymo), ichgout(itarg,ichg),
+     *              adj(itarg,ichg),std(itarg,ichg), sfnum(itarg,ichg),
+     *              sftrnd50(itarg, ichg), sftrnd50(itarg, ichg+1)
+	if (valent) write(6,'(" $%^3C ", i3,i5,1x,a," Estamt chgin: ",2i5,i2.2,i8,
      *              2i6,2f7.2,i5,2f7.3)')
      *              ipass, itarg, ntstn(itarg), ichg,
      *              iy, im, iskymo, nhits(iskymo), ichgout(itarg,ichg),
@@ -4149,6 +4193,12 @@ c   75     if(iedebug .ge. 1 .and. istep .ge. 2) then
      *              nhits(iskymo), ichgout(itarg,ichg),
      *              adj(itarg,ichg),std(itarg,ichg), sfnum(itarg,ichg),
      *              sftrnd50(itarg, ichg), sftrnd50(itarg, ichg+1)
+		 if (valent) write(6,'(" $%^3D ", i3,i5,1x,a," Estamt chgout: ",2i5,i2.2,i8,
+     *              2i6,2f7.2,i5,4f7.3)') ipass, itarg, ntstn(itarg),
+     *              ichg, iy, im, iskymo,
+     *              nhits(iskymo), ichgout(itarg,ichg),
+     *              adj(itarg,ichg),std(itarg,ichg), sfnum(itarg,ichg),
+     *              sftrnd50(itarg, ichg), sftrnd50(itarg, ichg+1)
                 endif
               endif
             enddo  
@@ -4386,8 +4436,10 @@ c           for annual data - put adjustments into monthly data
           print *, ' HOFN output disabled'
 c          call hofnout(itarg, ntstn, nchg, ichgmo)
         else  
+          write(6, *) ' ******************** WRITSTA ucp CALL'
           call writsta(itarg, ntstn(itarg), outtemp, adjtemp,
      *      contemp, outflag, adjflag, otag, idunit)
+          write(6, *) ' ******************** WRITSTA ucp CALL RET'
         endif
       enddo ! end of station write output loop
       

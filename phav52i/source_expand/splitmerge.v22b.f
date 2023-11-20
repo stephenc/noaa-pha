@@ -1,3 +1,13 @@
+	integer function iz2AB(a1)
+        character*11 a1
+        iz2AB = 0
+        if (a1(1:6) .eq. "621039") iz2AB = 1
+	if (a1(1:6) .eq. "615071") iz2AB = 1
+	if (a1(1:6) .eq. "636085") iz2AB = 1
+	if (a1(1:6) .eq. "600039") iz2AB = 1
+        return
+        end
+
 c     Copied from Skyline.0.9.0 (355)
  
       subroutine splitmerge(idunit, rrtemp, subnet, iopt, istnpt,
@@ -377,8 +387,54 @@ c     current lowest imo for each type of inhomog hit (1,2,3)
       real rrtemp(2,nmo)
       integer mknt2(2)
       real rslpq(2), rmuq(2)
-      otag = c2tech(iopt)
-      
+	logical valent
+	character*8 z2L /"  $%^2L "/
+	valent = .false.
+	otag = c2tech(iopt)
+	if (iz2AB(subnet(1)(1:lnblnk(subnet(1)))) .eq. 1) then
+		valent = .true.
+		print *, " $%^2A subnet(1) ", subnet(1), " ", subnet(2)
+	endif
+	if (iz2AB(subnet(2)(1:lnblnk(subnet(2)))) .eq. 1) then
+                valent = .true.
+                print *, " $%^2B subnet(2) ", subnet(2), " ", subnet(1)
+        endif
+c      otag = c2tech(iopt)
+c	valent = .false.
+c	if (z2AB(subnet(1)(1:lnblnk(subnet(1)),
+c		subnet(1)(1:lnblnk(subnet(1))) valent = .true.
+c      if (subnet(1) (1:lnblnk(subnet(1))) .eq. "62103953000") then
+c	print *, " $%^2A subnet(1) ", subnet(1)
+c	valent = .true.
+c      endif
+c      if (subnet(2) (1:lnblnk(subnet(1))) .eq. "62103953000") then
+c	print *, " $%^2B subnet(2) ", subnet(2)
+c	valent = .true.
+c      endif
+c	if (subnet(1) (1:lnblnk(subnet(1))) .eq. "62103952000") then
+c        print *, " $%^2C subnet(1) ", subnet(1) 
+c		valent = .true.
+c	endif
+c	if (subnet(1) (1:lnblnk(subnet(1))) .eq. "61507110000") then
+c        print *, " $%^2D subnet(1) ", subnet(1) 
+c		valent = .true.
+c	endif
+c	if (subnet(2) (1:lnblnk(subnet(1))) .eq. "62103952000") then
+c        print *, " $%^2E subnet(1) ", subnet(1) 
+c		valent = .true.
+c	endif
+c	if (subnet(2) (1:lnblnk(subnet(1))) .eq. "61507110000") then
+c        print *, " $%^2F subnet(1) ", subnet(1) 
+c		valent = .true.
+c	endif
+c	if (subnet(2) (1:lnblnk(subnet(1))) .eq. "63608513000") then
+c        print *, " $%^2G subnet(1) ", subnet(1)
+c                valent = .true.
+c        endif
+c        if (subnet(2) (1:lnblnk(subnet(1))) .eq. "63608512001") then
+c        print *, " $%^2H subnet(1) ", subnet(1)
+c                valent = .true.
+c        endif	
       mintest = 5
 c      mintest = minlen
 
@@ -600,6 +656,7 @@ c     if there was no changepoints - break first series anyway
 c     set the station output string
       stnstr = subnet(1)(1:lnblnk(subnet(1))) // '-' // 
      *  subnet(2)(1:lnblnk(subnet(1)))
+	if (valent) print *, " $%^2I ", stnstr
 
 c     initialize number of chgpts in last split/merge testseg calls
       nsplitin2 = 0
@@ -672,7 +729,7 @@ C      For MINBIC inclusion in method=1
      *      print *,' Parse segments (isplit = 1), ipass:', ipass
           call testseg(rTraw, ioptseg, inqtype, inhmod, inhstns,
      *      iFirst, mindy, inhyr, nsplitin2, lsplitin2,
-     *      offinh, segslp, sseseg, 1, ipchange, subnet, ierr)
+     *      offinh, segslp, sseseg, 1, ipchange, subnet, ierr, valent)
 c          print *,' ipchange ', ipchange
           if(ierr .ne. 0) goto 20
 c         move the prior last split out to the next split input
@@ -695,7 +752,7 @@ c       If ifirst pass complete, loop back and test shorter segments
      *    print *,' Merge segments (isplit = 0), ipass:', ipass
         call testseg(rTraw, ioptseg, inqtype, inhmod, inhstns, 
      *    iFirst, mindy, inhyr, nmergein2, lmergein2,
-     *    offinh, segslp, sseseg, 0, imchange, subnet, ierr)
+     *    offinh, segslp, sseseg, 0, imchange, subnet, ierr,valent)
 c        print *,' imchange ', imchange
         if(ierr .ne. 0) goto 20
 c       move the prior last merge out to the next merge input
@@ -746,6 +803,12 @@ c                                                added 16apr2009
      *          write(6,'(a, " ", a, " Remove 0 Short Segment ", i4,
      *          i3, i5, " to ",i4,i3, i5, i5)') subnet(1), otag,
      *          iyr1, imth1, iob1, iyr2, imth2, iob2, mknt
+	if (valent) then
+	if(idebug .ge. 1)
+     *  write(6,'("  $%^2J ", a, " ", a, " Remove 0 Short Segment ", i4,
+     *          i3, i5, " to ",i4,i3, i5, i5)') subnet(1), otag,
+     *          iyr1, imth1, iob1, iyr2, imth2, iob2, mknt
+	endif
               do nx = iob1, iob2
                 if(rTraw(nx).gt.amiss+1.) then
                   call work2sky(itarg, nx, iyrd, imthd, iskymo, 1)
@@ -955,6 +1018,11 @@ c         V21F modification - ALLOW ALL TPR MODELS FOR TPR0
      *        stnstr(1:lnblnk(stnstr)), itarg, ipair, otag, wadj,
      *        end1, iye1, ime1,
      *        beg2, iyb2, imb2, modtype, inhstns(ichg)
+	if (valent) write(6,
+     *   '( " $%^2K",  a,2i5,1x,a," TESTSEG SKIP:",f7.2,2(2i5,i3),2i3)') 
+     *        stnstr(1:lnblnk(stnstr)), 
+     *        itarg, ipair, otag, wadj, end1, iye1, ime1,
+     *        beg2, iyb2, imb2, modtype, inhstns(ichg)
           endif
         else
           nsig = nsig + 1
@@ -974,9 +1042,14 @@ c         year/month of sig changepoint (beg-end of span)
             call imo2iym(iye1,ime1,end1)
             call imo2iym(iyb2,imb2,beg2)
             write(6,'(a,2i5,1x,a," TESTSEG ADJ: ",2f7.2,2f8.4,2(2i5,i3),
-     *       2i3)') stnstr(1:lnblnk(stnstr)), itarg, ipair, otag, 
+     *       3i3)') stnstr(1:lnblnk(stnstr)), itarg, ipair, otag, 
      *       asigx(nsig), azscr(nsig), rslp1, rslp2, end1, iye1, ime1,
-     *       beg2, iyb2, imb2, modtype, istnpt(nsig)
+     *       beg2, iyb2, imb2, modtype, istnpt(nsig), nsig
+	if (valent) write(6,
+     *'(a,a,2i5,1x,a," TESTSEG ADJ: ",2f7.2,2f8.4,2(2i5,i3),3i3)')
+     *       z2L, stnstr(1:lnblnk(stnstr)), itarg, ipair,
+     *       otag, asigx(nsig), azscr(nsig), rslp1, rslp2, end1, iye1,
+     X       ime1, beg2, iyb2, imb2, modtype, istnpt(nsig), nsig
           endif
           call imo2iym(iy, im, end1)
         endif  
@@ -991,7 +1064,7 @@ c     =======================================================================
 c
       subroutine testseg(rTraw, ioptseg, inqtype, inhmod, inhstns,
      *  inFirst, mindy, inhyr, lindy, lnhyr, offinh, segslp, sseseg,
-     *  iSplit, ichange, subnet, ierr)
+     *  iSplit, ichange, subnet, ierr, valent)
 c     loop through the segments - splitting at definitely inhomog,
 c       keep when definitely homog, and restraining when questionable
       INCLUDE 'inhomog.parm.mthly.incl' 
@@ -1051,6 +1124,7 @@ c     mindy is the total number of date indices in the chgpt array
       integer StatTest, end1
       
       real rmuq(2), rslpq(2)
+	logical valent
       mintest = 5
 c      mintest = minlen
 
@@ -1339,6 +1413,8 @@ c         determine the optimum Bayesian Info Criteria for found station/chgpt
    30     iyrstat = iqob1
           if(idebug .ge. 2)
      *      print *,' Entering MINBIC:',iyr1,imth1,iyrb,imthb,iyr2,imth2
+	if(idebug .ge. 2)
+     *      print *,' $%^2N Entering MINBIC:',iyr1,imth1,iyrb,imthb,iyr2,imth2
           call minbic(2, qx, qy, iqob1, numx, critval, curstat,
      *      qmin, toff, rmuq, rslpq, rsseq, inqtype, iqtype, mknt2, 
      *      ifail)
@@ -1358,6 +1434,13 @@ c         save BIC data
      *      subnet(1),subnet(2), iyr1, imth1, iob1, iyrb, imthb, end1, 
      *      iyrb2, imthb2, end1 + 1, iyr2, imth2, iob2, curstat,  
      *      critval, toff, rslpq, mknt2, iqtype
+	if (valent) then
+	if(idebug .ge. 1) write(6,'("  $%^2M ", a, "-", a, " BIC: ",
+     *      2(2(i5, i2.2, i5), " : "), 3f7.2, 2f7.3, 3i5)')
+     *      subnet(1),subnet(2), iyr1, imth1, iob1, iyrb, imthb, end1,
+     *      iyrb2, imthb2, end1 + 1, iyr2, imth2, iob2, curstat,
+     *      critval, toff, rslpq, mknt2, iqtype
+	endif
             
           if(iqtype .eq. 2) then
             StatTest = homog

@@ -95,7 +95,9 @@ c     MM's metadata to the alignment routine (move is Sky array)
       
 c     mmdates contains the dates of going to/from MMTS
       integer mmdates(maxstns,2)
-
+	call subpon(" ==== SHAPinp.v7c read_hist entr", 436, 0)
+	write(437,*)" ishfmeta ",ishfmeta," mmunit ",mmunit,
+     *  " irandom ",irandom, " idebug ", idebug
       lin = 0
       
       if(irandom .ne. 0) then
@@ -149,8 +151,11 @@ c       init last station
         do while (1 == 1)
           
 c          print *, 'Read in the station history'
+	if(itotmstn .lt. 7) write(437,*) 'Read in the station history ',
+     *    itotmstn, " nc ", nc
           read(mmunit,'(2x,a11,i7,i2)',end=90,err=100) pstn, iym, itemp
-          if(idebug .ge. 2) print *,pstn, iym, itemp
+c          if(idebug .ge. 2) print *,pstn, iym, itemp
+	if(itotmstn .lt. 7) write(437,*) pstn, iym, itemp
             
 c         see if station has changed
           if(pstn .ne. lstn) then
@@ -160,12 +165,16 @@ c             finish out the last station move with the end-of-period
               move(nc) = itsky2
 c             process accumulated metadata for last station
 c             align SHF moves with missing and minlen data segments
-              if(idebug .ge. 2) 
-     *          print *,' IN: ',cin, istn, (move(i),i=1,nc)
+c              if(idebug .ge. 2) 
+c     *          print *,' IN: ',cin, istn, (move(i),i=1,nc)
+	if(itotmstn .lt. 7) write(437,*)' IN: ',cin, istn, 
+     *     (move(i),i=1,nc)
               call alignmoves(cin, istn, mounit, nc, move, amt, 
      *          mday)
-              if(idebug .ge. 2) 
-     *          print *,' OUT: ',cin, istn, (move(i),i=1,nc)
+c              if(idebug .ge. 2) 
+c     *          print *,' OUT: ',cin, istn, (move(i),i=1,nc)
+	if(itotmstn .lt. 7) write(437,*) ' OUT: ',cin, istn, 
+     *      (move(i),i=1,nc)
               itotmeta = itotmeta + nc
             endif
             
@@ -194,12 +203,16 @@ c               setup the first move to begin at the beginning
                 move(nc) = itsky1
                 mday(nc) = 1
 c                print *,' Found: ',istn, itsky1, itsky2
+	if(itotmstn .lt. 7) write(437,*)' Found: ',istn, itsky1,
+     *     itsky2
                 goto 80
               endif
             enddo
           
    80       if(ifound .eq. 0) then
               print *,'No station found for ',cin
+	if(itotmstn .lt. 7) write(437,*)'No station found for ',
+     *             cin
             else  
               lstn = pstn
             endif
@@ -213,8 +226,10 @@ c                print *,' Found: ',istn, itsky1, itsky2
               nc = nc + 1
               move(nc) = iskymo
 c              print *,cin,iy,im,iskymo
+	if(itotmstn .lt. 7) write(437,*)cin,iy,im,iskymo
             else
-              if(idebug .ge. 2) print *,'Outside of POR:',cin,iy,im
+c              if(idebug .ge. 2) print *,'Outside of POR:',cin,iy,im
+	if(itotmstn .lt. 7) write(437,*)'Outside of POR:',cin,iy,im
             endif  
           endif  
         enddo
@@ -226,15 +241,23 @@ c              print *,cin,iy,im,iskymo
 c         process accumulated metadata for last station
 c         align SHF moves with missing and minlen data segments
 c          print *,' IN: ',cin, istn, (move(i),i=1,nc)
+	if(itotmstn .lt. 7) write(437,*)' IN: ',cin, istn, 
+     *      (move(i),i=1,nc)
           call alignmoves(cin, istn, mounit, nc, move, amt, 
      *      mday)
 c          print *,' OUT: ',cin, istn, (move(i),i=1,nc)
+	if(itotmstn .lt. 7) write(437,*)' OUT: ',cin, istn, 
+     *      (move(i),i=1,nc)
           itotmeta = itotmeta + nc
         endif
         print *,'Number of PW-SHF stations, changes:',itotmstn,itotmeta
+	if(itotmstn .lt. 7) write(437,*)'Number of PW-SHF stations',
+     *      ', changes:',itotmstn,itotmeta
 
       else if(ishfmeta .ne. 0) then
         print *, '----------- Normals history format --------------'
+	if(itotmstn.lt.7)write(437,*)'-- Normals history format --'
+	if(itotmstn.lt.7)write(6,*)'-- Normals history format -- inshp4'
         call inshp4(ntstn, inread, amt, mmdates, mounit)  
         if(inread .eq. 0) stop
       endif
@@ -242,14 +265,16 @@ c          print *,' OUT: ',cin, istn, (move(i),i=1,nc)
 c     temporary abort for printout
 c     also set IHDBUG=2 in INSHP4
 c      stop
-      
+      call subpon(" ==== SHAPinp.v7c read_hist retu",436,1)
       return
       
   100 call perror(' Unable to read Pthorne history: ' // mattmeta)
+      call subpon(" ==== SHAPinp.v7c read_hist re 2",436,1)
       stop
       
 c     read error in Matt's meta.txt
   999 call perror(' Unable to read Matt meta.txt: ' // mattmeta)
+      call subpon(" ==== SHAPinp.v7c read_hist re 3",436,1)
       stop
       end
 
@@ -529,7 +554,7 @@ c        measurement type, then the amount of change (=45 arcseconds)
       integer INSTR(ninstr),LINSTR(ninstr)
 c      character*5 prcp1/'     '/, tmpr1/'     '/, 
 c     *  lprcp1/'     '/, ltmpr1/'     '/
-
+	call subpon(" ==== SHAPinp.v7c INSHP4 entry  ", 436, 0)
       print *,' INSHP4 - old style UHCNv1 station history files'
 
       inread = 1
@@ -1068,7 +1093,7 @@ c       align SHF moves with missing and minlen data segments
 
 C     CLOSE STATION HISTORY FILE
       CLOSE(9,ERR=240)
-
+	call subpon(" ==== SHAPinp.v7c INSHP4 return ", 436, 1)
       RETURN
 
 C     PRINT ERROR MESSAGE AND ABORT PROGRAM

@@ -113,7 +113,7 @@ c     work arrays for minimizing # neighbors
 
 c     initialize variables
 c     number of stations to correlate comes from 
-
+      call subpon(" ==== HCNCOR entry              ", 434, 0)
       bad = amiss
       iwrite = 0
       idebug = 0
@@ -131,12 +131,13 @@ c       elements to process (1=max, 2=min, 3=avg, 4=pcp)
       print *,' From prehomog include headers:'
       print *,' Minmths: ', minmths
       print *,' Maxnets: ', maxnets
-c      print *,' Minstns: ', minstns
-c      print *,' Nstns:   ', nstns
+      print *,' Minstns: ', minstns
+      print *,' Nstns:   ', nstns
 
 c     begin command line code      
 c     get the number of command line arguments
       narg = iargc()
+          PRINT *, ' narg: ', narg
       if(narg .lt. 3) then
         print *,' not all required parameters given'
         goto 10
@@ -158,6 +159,10 @@ c     get last year of data to process
       call getarg(iarg,argv)
       iarg = iarg + 1
       read(argv,fmt='(i4)') endyr
+          PRINT *, ' endyr: ', endyr
+          PRINT *, ' ibegyr: ', ibegyr
+          PRINT *, ' mincorr: ', mincorr
+          mincorr = 20
       if(endyr .lt. ibegyr + mincorr) then
         print *, 'command line input endyr:', endyr, 
      *    ' too low, must be at least:', ibegyr+mincorr
@@ -377,6 +382,12 @@ c       reading the hcn-cdmp merged station list
           read(10,'(a6)',err=174,end=174) icid
         endif  
         cfname = nfname(j)
+	if ((j .ge. 6419) .and. (j .le. 6421)) then
+	write(434, *) "j ", j, cfname
+c        write(434, 4341) ibegyr, ilstyr,dstn,dyear,(idata(i),iflag(i)
+c     *     ,i=1,12)
+c4341    format(" ",i4, i5,1x,a11,1x,i4,12(i6,a3))
+        endif
 c        if(mod(j,100) .eq. 1) print *,j,' Correlated: ',icid
 
 c       initialize stat output variables
@@ -424,6 +435,7 @@ c       initialize first cell of correlation and pointer arrays
         corrn(1) = 1.
           
         do k = 2,nin
+		write(6,*) " >>> j ", j, " k ", k, " nin ", nin
 c         initialize correlation and pointer arrays
           corrs(k) = 0.
           ptr2(k) = ptr(j,k)
@@ -465,10 +477,51 @@ c         align non-missing years between candidate and neighbor
           
           if(corr_type .eq. '1diff') then
 c           make the first difference of the candidate station
+	if ((j .ge. 6419) .and. (j .le. 6421) .and. (k .le. 3)) then
+      write(434, *)"YYY j k ",j,k," nx nal ",nal," x c1 ",c1(1),c1(nal)
+      write(6, *)"YYY j k",j,k," nx nal ",nal," x c1 ",c1(1),c1(nal)
+      write(434,4342) (c1(jk), jk = 1, nal)
+      write(6,4342) (c1(jk), jk = 1, nal)
+4342  format(1x, 12f8.4) 
+c        write(434, 4341) ibegyr, ilstyr,dstn,dyear,(idata(i),iflag(i)
+c     *     ,i=1,12)
+c4341    format(" ",i4, i5,1x,a11,1x,i4,12(i6,a3))
+        endif
             call frstdif(nal, c1, c1diff, bad)
+	if ((j .ge. 6419) .and. (j .le. 6421) .and. (k .le. 3)) then
+      write(434,*)"ZZZ j k ",j,k," y c1diff ",c1diff(1),c1diff(nal-1)
+      write(6,*)"ZZZ j k ",j,k," y c1diff ",c1diff(1),c1diff(nal-1)
+	write(434,4342) (c1diff(jk), jk = 1, (nal - 1))
+      write(6,4342) (c1diff(jk), jk = 1, (nal - 1))
+c        write(434, 4341) ibegyr, ilstyr,dstn,dyear,(idata(i),iflag(i)
+c     *     ,i=1,12)
+c4341    format(" ",i4, i5,1x,a11,1x,i4,12(i6,a3))
+      write(434, *) " ZZZ bad: ", bad
+      write(6, *) " ZZZ bad: ", bad
+        endif
 
 c           make the first difference of each network station series
+	if ((j .ge. 6419) .and. (j .le. 6421) .and. (k .eq.2)) then
+      write(434,*)"UUU j k ",j,k," nx nal ",nal," x n1 ",n1(1),n1(nal)
+      write(6,*)"UUU j k ",j,k," nx nal ",nal," x n1 ",n1(1),n1(nal)
+      write(434,4342) (n1(jk), jk = 1, nal)
+      write(6,4342) (n1(jk), jk = 1, nal)
+c        write(434, 4341) ibegyr, ilstyr,dstn,dyear,(idata(i),iflag(i)
+c     *     ,i=1,12)
+c4341    format(" ",i4, i5,1x,a11,1x,i4,12(i6,a3))
+        endif
             call frstdif(nal, n1, n1diff, bad)
+	if ((j .ge. 6419) .and. (j .le. 6421) .and. (k .eq. 2)) then
+      write(434,*) "VVV j k ",j,k," y n1diff ",n1diff(1),n1diff(nal-1)
+      write(6,*) "VVV j k ",j,k," y n1diff ",n1diff(1),n1diff(nal-1)
+      write(434,4342) (n1diff(jk), jk = 1, (nal - 1))
+      write(6,4342) (n1diff(jk), jk = 1, (nal - 1))
+c        write(434, 4341) ibegyr, ilstyr,dstn,dyear,(idata(i),iflag(i)
+c     *     ,i=1,12)
+c4341    format(" ",i4, i5,1x,a11,1x,i4,12(i6,a3))
+      write(434, *) " VVV bad: ", bad
+      write(6, *) " VVV bad: ", bad
+        endif
           else
 c           skip first difference calculation, use full series
             do ix = 1, nal
@@ -485,6 +538,12 @@ c             therefore distance is pre-eminent
 c           calculate correlation w/1st diff or full series
             call correl(nal, c1diff, n1diff, amiss, corrs(k), 
      *        var(k), var(1), pairs(k))
+	if ((j .ge. 6419) .and. (j .le. 6421) .and. (k .eq. 2)) then
+        write(434, *)"j ",j," correl corrs(1) ",corrs(1)," corrs(k) ",corrs(k)
+c        write(434, 4341) ibegyr, ilstyr,dstn,dyear,(idata(i),iflag(i)
+c     *     ,i=1,12)
+c4341    format(" ",i4, i5,1x,a11,1x,i4,12(i6,a3))
+        endif
             if(pairs(k) .lt. minmths) then
               print *,cid(nid),'-',cid(ptr(j,k)),' too few corr-pairs ',
      *          nid,ptr(j,k),pairs(k),corrs(k)
@@ -627,10 +686,10 @@ c     *        nid,ptr2(k),corrn(k)
         iwrite = iwrite + 1
 
       enddo
-  
+      call subpon(" ==== HCNCOR exit               ", 434, 1)  
 c     close data file
   130 close(20)
-
+      
 c     skip error messages
       go to 310
 
@@ -659,7 +718,46 @@ c     print error message and abort program
   310 stop
 
       end
-
+CC      subroutine subpon(txt, iu, iw)
+CC      character*80 txt
+CC      character*24 greeting
+CC      call fdate( greeting )
+CC      print *, txt, " ", greeting
+CC      if (iu .eq. 0) then
+CC        open(iu, FILE = '~/ponfile4.txt', STATUS = 'old', ERR = 150)
+CC      endif
+CC      write(iu, 1) txt, " ", greeting
+CC    1 format(1x, A, A, A)
+CC      if (iu .eq. 1) then
+CC        close(iu)
+CC      endif
+CC      go to 160
+CC  150 print *, txt, " OPEN ERROR ", iu, " ", greeting
+CC  160 return
+CC      end
+      subroutine subpon(txt, iu, iw)
+      character*32 txt
+      character*24 greeting
+      call fdate( greeting )
+      print *, txt, " p ", greeting
+      write(*, *) txt, " * ", greeting
+      write(6, *) txt, " 6 ", greeting
+      if (iw .eq. 0) then
+        open(iu, FILE = '~/ponfile6.txt', STATUS = 'old', ERR = 150)
+	write(iu, 1) greeting, " 4 ", txt
+      endif
+      if (iw .eq. 1) then
+        write(iu, 1) greeting, " 4 ", txt
+        close(iu)
+      endif
+      if (iw .gt. 1) then
+        write(iu, 1) greeting, " 4 ", txt
+      endif
+    1 format(1x, A, A, A)
+      go to 160
+  150 print *, txt, " OPEN ERROR ", iu, " ", greeting
+  160 return
+      end
 c***********************************************************************
 c end of program hcncor.                                               *
 c***********************************************************************
@@ -713,6 +811,7 @@ c     3220 input variables
       character*11 dstn
       character*3 cRecType
       character*4 cElmType
+	character*32 pontxt
       integer iMonth(12),iDay(12),iValue(12)
       
       real ddata(ibegyr:ilstyr,12),tdata(12)
@@ -733,6 +832,18 @@ c     initialize data array for current station
 
 c     open station data file
       if(idebug.gt.0) print *, nfname(stnind)(1:lnblnk(nfname(stnind)))
+	if ((stnind .ge. 6419) .and. (stnind .le. 6421)) then
+c		pontxt = "                                "
+c      		write(pontxt, 434) indatyp, stnind,
+c     1 			nfname(stnind)(1:lnblnk(nfname(stnind)))
+434		format(i1, i6, 1x, a24)
+c Sat Oct 29 21:34:27 2022 4 0  6419 /home/peter/Llew1/pha_v5
+c nfname 0 6419 2i/data/benchmark/world2/monthly/raw/62103952000.raw.tavg
+c nfname 0 6420 2i/data/benchmark/world2/monthly/raw/62103953000.raw.tavg
+c nfname 0 6421 2i/data/benchmark/world2/monthly/raw/62103955000.raw.tavg 
+c		call subpon(pontxt, 434, 2)
+		write(434, *) "nfname ",  indatyp, stnind, nfname(stnind)
+	endif
       open(17, file=nfname(stnind), err=110)
     
       do im = 1,12
@@ -747,6 +858,11 @@ c         candidate station data in normals format
           read(17,1000,end=100,err=110) dstn,dyear,(idata(i),iflag(i)
      *      ,i=1,12)
  1000     format(a11,1x,i4,12(i6,a3))
+	if ((stnind .ge. 6419) .and. (stnind .le. 6421)) then
+	write(434, 4341) ibegyr, ilstyr,dstn,dyear,(idata(i),iflag(i) 
+     *     ,i=1,12)
+4341	format(" ",i4, i5,1x,a11,1x,i4,12(i6,a3))
+	endif
           if(dyear .lt. ibegyr .or. dyear .gt. ilstyr) go to 95
           do im = 1, 12
             if(idata(im) .eq. imiss .or. iflag(im)(2:2) .ne. ' ') then

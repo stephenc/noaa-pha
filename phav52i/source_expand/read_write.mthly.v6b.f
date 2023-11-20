@@ -603,6 +603,7 @@ c       for all the iterations
           outfile = odir(1:lnblnk(odir)) // version(1:lnblnk(version)) 
      *      // '.' // c2tech(intech)
           iounit = bunit + intech
+      if (iounit .eq. 11) print *, '============== openunits', outfile
           open(iounit,file=outfile,status='unknown')
         endif
       enddo
@@ -610,7 +611,7 @@ c       for all the iterations
       return
       end
      
-c     =======================================================================
+c     ===1=========2=========3=========4=========5=========6=========7=======
       subroutine closeunits()
       INCLUDE 'inhomog.comm.mthly.incl'
 
@@ -707,6 +708,11 @@ c     variables for text output construction due to G77 inadequacies
 c     imxskymo is the index in the skyline matrix for filling the data
 c       tested against maxskymo command line input for array size
       integer imxskymo /1/
+	character*24 greeting
+	call fdate( greeting )
+c               write(436, *) greeting, ' A nsnet: ', nsnet
+        write(436, *) greeting,' READNET: begyr ', begyr, ' endyr: ',
+     * endyr
       
       if(iushcn .eq. 0) then
         istnlen = 11
@@ -733,20 +739,45 @@ c     For Normals or HOFN type input, read in candidate & network indices
       if(ihyear .gt. 0 .or. irandom .eq. 0) then
 c       read in all subnetworks from the correlation output
         itarg = 0
-        print *,' nsnet: ', nsnet
+
+        print *,' A nsnet: ', nsnet
+cc       write(6, *) ' A nsnet: ', nsnet, ' nnunit: ', nnunit,
+cc    *    ' itarg: ', itarg, ' iushcn: ', iushcn
+	call fdate( greeting )
+c		write(436, *) greeting, ' A nsnet: ', nsnet
+        write(436, *) greeting,' A nsnet: ', nsnet, ' nnunit: ',
+     * nnunit,' itarg: ',itarg,' iushcn: ',iushcn,' incap: ', incap
         do while (1 .eq. 1)
+cc	  write(6, *) ' YYY0 iushcn ', iushcn, nnunit
           if(iushcn .eq. 0) then
-            read(nnunit, '(a11)', end=80) instn
+            read(nnunit, '(a11)', end=80, err=431) instn
+		goto 432
+431	call fdate( greeting )
+  432	write(436, *) greeting,' ERROR NOT READ nnunit: ',nnunit
+cc  432		write(6, *) ' YYY0 iushcn ', iushcn, nnunit, instn
           else
             read(nnunit, '(a6)', end=80) instn
-          endif  
+cc                write(6, *) ' YYY1 iushcn ', iushcn, nnunit, instn
+          endif
+	call fdate( greeting )  
+	write(436, *)greeting,' YYY1 iushcn ',iushcn,nnunit,instn
 c          print *, 'instn ', instn
           read(nnunit, *, end = 80) (indx(i),i=1,nsnet)
+cc                write(6, *) ' YYY2 nsnet ', nsnet
+	call fdate( greeting )
+		write(436, *) greeting, ' YYY2 nsnet ', nsnet
           read(nnunit, *, end = 80) adum
+cc                write(6, *) ' YYY2 adum ', adum
+	call fdate( greeting )
+		write(436, *) greeting, ' YYY2 adum ', adum
           itarg = itarg + 1
           k = indx(1)
+cc                write(6, *) ' YYY3 itarg k ', itarg, k
           if(k .gt. maxstns) then
             print *,' Number input stations > maxstns ',maxstns
+	call fdate( greeting )
+      write(436, *) greeting,' Number input stations > maxstns ',
+     * maxstns
             stop
           endif  
           ntstn(k) = instn 
@@ -754,9 +785,20 @@ c          print *, 'instn ', instn
             nindx(k,i) = indx(i)
           enddo  
         enddo
-
+	write(6, *) ' ENDDO nsnet: ', nsnet, ' nnunit: ', nnunit,
+     *    ' itarg: ', itarg, ' iushcn: ', iushcn
+	call fdate( greeting )
+	write(436, *)greeting,' ENDDO nsnet: ',nsnet,' nnunit: ',
+     *    nnunit, ' itarg: ', itarg, ' iushcn: ', iushcn
+	
 c       if no subnets have been read, end it here....
-   80   if(itarg .eq. 0) goto 200
+80      write(6, *) ' AT 80 nsnet: ', nsnet, ' nnunit: ', nnunit,
+     *    ' itarg: ', itarg, ' iushcn: ', iushcn
+	call fdate( greeting )
+      write(436, *) greeting,' AT 80 nsnet: ', nsnet, ' nnunit: ', 
+     *    nnunit, ' itarg: ', itarg, ' iushcn: ', iushcn
+C   80   if(itarg .eq. 0) goto 200
+	if (itarg .eq. 0) go to 200
   
 c       total number of stations (& subnets) == last index
         numsubs = indx(1)
@@ -774,7 +816,8 @@ c       read 3220 datafiles
                 
           nfname = incand(1:lnblnk(incand)) //  ntstn(istn)(1:istnlen)
      *      // '.3220'
-          open(idunit,FILE=nfname,status='old',err=92)
+       if (idunit .eq. 11) print *, '============== HOFN data', nfname
+	  open(idunit,FILE=nfname,status='old',err=92)
 
 c         initialize station info
           intr(iStn) = 1
@@ -839,6 +882,8 @@ c         adjust working sky index for next station
 
   100   numsubs = iStn - 1
         print *, 'Number of stations read: ', numsubs
+	call fdate( greeting )
+	write(436, *) greeting,'Number of stations read: ',numsubs
 
 c     ---------------- Normals & Pthorne data format -----------------
       else if(irandom .eq. 0) then
@@ -882,7 +927,8 @@ c       changed for the GHCNMv2 station and GHCN-daily filename formats
           if(idebug .ge. 2) print *,nfname  
 
 c         Open temporary i/o unit for data input
-          open(idunit, FILE = nfname, err = 130)
+      if (idunit.eq.11) print *, '============== err = 130', nfname
+	  open(idunit, FILE = nfname, err = 130)
 
 c         initialize station info
           intr(iStn) = 1
@@ -1023,13 +1069,21 @@ c        if(istn .gt. endstn) goto 190
 
 c      print *,'Last station (subnet) index:',numsubs
 c      print *,' readnet orig(49,1950,1):',orig(49,1950,1)
+	call fdate( greeting )
+      write(436, *)greeting,'Last station (subnet) index:',numsubs
+      write(436,*)greeting,' readnet orig(49,1950,1):'
+c,orig(49,1950,1)
       return
       
   190 print *,' Candidate network past end station'
+	call fdate( greeting )
+	write(436, *)greeting,' Candidate network past end station'
       ieof = 1
       return
 
   200 print *,' End of candidate network records'
+	call fdate( greeting )
+	write(436, *)greeting,' End of candidate network records'
       ieof = 1
       return
     
@@ -1091,7 +1145,7 @@ c      include 'inhomog.restart.mthly.incl'
      *  cval(begyr:endyr,NMTH)
       character*132 dfile, dpath, strpath
       integer idval(NMTH), iprnt(begyr:endyr)
-      
+      write(6, *) ' *******************************WRITSTA rw IN'
       if(iushcn .eq. 0) then
         istnlen = 11
       else
@@ -1106,6 +1160,7 @@ c     data file first
         dpath = outcoop(1:lnblnk(outcoop))
         strpath = 'CoopOutDir: '
       endif
+      write(6, *) ' ZZA ', iounit, itarg, ncand, strpath, dpath
       ostr = otag // 's.' // otype(1:lnblnk(otype))
       if(iushcn .eq. 0) then
         dfile = dpath(1:lnblnk(dpath))// ostr(1:lnblnk(ostr)) //
@@ -1122,8 +1177,10 @@ c     data file first
      *    '/' // cstn(1:istnlen) // '_' // iuelem //
      *    '.' // ostr(1:lnblnk(ostr))
       endif
+      write(6, *) ' ZZB ', iounit, itarg, ncand, strpath, dpath
 
 c     open output file
+      if (iounit .eq. 11) print *, '============== err= 130', dfile
       open(iounit, FILE=dfile, err= 300)
       
 c     HOLD !!!!!!!!!!!!!!!!!!!!!!
@@ -1133,6 +1190,7 @@ c        write(iounit,20,ERR=300) istn, iy + begyr - 1, inel,
 c     *    (dval(im,iy),dflag(iy,im),im = 1,NMTH)
 c   20   FORMAT(I6.6,1X,I4,1X,I1,'F',13(F6.2,1x,a1,2x))           
 c      end do
+      write(6, *) ' ZZC ', iounit, itarg, ncand, strpath, dpath
 
 c     write the data in Normals format
       ishort = 0
@@ -1183,6 +1241,7 @@ c           The PHA has deleted the data value - standardize qflag
         endif  
       enddo
       close(iounit)
+      write(6, *) ' ZZD ', iounit, itarg, ncand, strpath, dpath
       write(*,'(" Writing: ",a,5i4)') strpath(1:lnblnk(strpath)),
      *  ishort, idelete, iunstbl, ichgptm, iunknown
       
@@ -1193,7 +1252,9 @@ c     adjustment file next
       ostr = otag // 'a.' // otype(1:lnblnk(otype))
       dfile = dpath(1:lnblnk(dpath))// ostr(1:lnblnk(ostr)) //
      *    '/' // cstn // '.' // ostr(1:lnblnk(ostr)) // '.' // icelem
+      write(6, *) ' ZZE ', iounit, itarg, ncand, strpath, dpath
 c     open output file
+      if (iounit .eq. 11) print *,'============== err= 300 (2)',dfile
       open(iounit, FILE=dfile, err= 300)
       
 c     HOLD !!!!!!!!!!!!!!!!!!!!!!
@@ -1218,6 +1279,7 @@ c     write the data in Normals format
      *      (idval(im),aflag(iy,im), im=1,NMTH)
         endif
       enddo
+      write(6, *) ' ZZF ', iounit, itarg, ncand, strpath, dpath
       close(iounit)
 
 c     err of adj file next
@@ -1225,8 +1287,9 @@ c     err of adj file next
       dfile = dpath(1:lnblnk(dpath))// ostr(1:lnblnk(ostr)) //
      *    '/' // cstn // '.' // ostr(1:lnblnk(ostr)) // '.' // icelem
 c     open output file
+      if (iounit .eq. 11) print *, '============== err= 300 (3)', dfile
       open(iounit, FILE=dfile, err= 300)
-      
+      write(6, *) ' ZZG ', iounit, itarg, ncand, strpath, dpath
 c     write the data in Normals format
       do iy = begyr, endyr
         if(iprnt(iy) .eq. 1) then
@@ -1241,15 +1304,21 @@ c     write the data in Normals format
      *      (idval(im),aflag(iy,im), im=1,NMTH)
         endif
       enddo
+      write(6, *) ' ZZH ', iounit, itarg, ncand, strpath, dpath
   100 close(iounit)
+      write(6, *) ' ZZI ', iounit, itarg, ncand, strpath, dpath
+      write(6, *) ' ***************** WRITSTA rw a RET'
       return
       
   200 print *,' Perimeter station not output: ', cstn
+      write(6, *) ' ZZJ ', iounit, itarg, ncand, strpath, dpath
+      write(6, *) ' ***************** WRITSTA rw b RET'
       return
       
   300 call perror(' ERROR: writing output: ' // dfile)
+        write(6, *) ' ***************** WRITSTA rw c RET'
       stop
-      
+
       end
   
 c     =======================================================================

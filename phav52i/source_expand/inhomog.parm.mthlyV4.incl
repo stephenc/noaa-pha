@@ -1,0 +1,37 @@
+C       This is the BASIC RESOURCE FILE containing parameter settings  
+c        for the inhomogeneity routines in the current project
+c
+c ----------------------------------------------------------------------
+c       Parameters that can be changed from one project to another
+
+c       USE WITH GHCN CASE
+
+c       PROJECT NAME
+        character*16 project
+        parameter (project = 'TESTRUN')
+
+c       Earliest year to process
+        integer begyr
+        parameter (begyr = 1701)
+
+c       Latest year to process
+        integer endyr
+        parameter (endyr = 2022)
+
+c       Number of stations in the metalist
+        integer maxstns
+        parameter (maxstns = 27800)
+
+c       Maximum number of neighbors for each candidate
+        integer maxnstns
+        parameter (maxnstns = 100)
+
+c       Missing data definition
+        real amiss
+        parameter (amiss = -99.99)
+        
+c ----------------------------------------------------------------------
+c       Parameters NOT TO BE CHANGED from project to project
+ 
+        INCLUDE 'inhomog.parm.system.mthly.incl'
+        INCLUDE 'inhomog.combo.mthly.incl'

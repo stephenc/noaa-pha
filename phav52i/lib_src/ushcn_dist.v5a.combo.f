@@ -164,7 +164,7 @@ c     command line variables
 c     input directory for default files (overridden with -i dirname)
 c      originally - /'/sd4/dbowman/ushcn/files/'/
       integer iargc, narg
-      
+      call subpon(" ==== HCNDIS entry              ", 432, 0)            
       print *,'Initial & Increment Distance: ',distini, distinc
 
 c     initialize variables
@@ -415,7 +415,7 @@ c     close output file
 c     notify user of successful completion
       write(6,230)
   230 format('hcn_dist has completed successfully!')
-
+      call subpon(" ==== HCNDIS exit               ", 432, 1)
 c     skip error messages and end program
       go to 380
 
@@ -439,7 +439,46 @@ c     error messages and aborts
 
   380 stop
       end
-
+c      subroutine subpon(txt, iu, iw)
+c      character*80 txt
+c      character*24 greeting
+c      call fdate( greeting )
+c      print *, txt, " ", greeting
+c      if (iu .eq. 0) then
+c        open(iu, FILE = '~/ponfile2.txt', STATUS = 'old', ERR = 150)
+c      endif
+c      write(iu, 1) txt, " ", greeting
+c    1 format(1x, A, A, A)
+c      if (iu .eq. 1) then
+c        close(iu)
+c      endif
+c      go to 160
+c  150 print *, txt, " OPEN ERROR ", iu, " ", greeting
+c  160 return
+c      end
+      subroutine subpon(txt, iu, iw)
+      character*32 txt
+      character*24 greeting
+      call fdate( greeting )
+      print *, txt, " p ", greeting
+      write(*, *) txt, " * ", greeting
+      write(6, *) txt, " 6 ", greeting
+      if (iw .eq. 0) then
+        open(iu, FILE = '~/ponfile6.txt', STATUS = 'old', ERR = 150)
+        write(iu, 1) greeting, " 4 ", txt
+      endif
+      if (iw .eq. 1) then
+        write(iu, 1) greeting, " 4 ", txt
+        close(iu)
+      endif
+      if (iw .gt. 1) then
+        write(iu, 1) greeting, " 4 ", txt
+      endif
+    1 format(1x, A, A, A)
+      go to 160
+  150 print *, txt, " OPEN ERROR ", iu, " ", greeting
+  160 return
+      end
 c***********************************************************************
 c end of program hcndis.                                               *
 c***********************************************************************

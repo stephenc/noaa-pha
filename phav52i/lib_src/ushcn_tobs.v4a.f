@@ -464,7 +464,7 @@ c      CHARACTER*25 FILDIR /'/sd4/dbowman/ushcn/files/'/
 
 c     metatypes is just the input type 
       character*7 metatype(3)/'Normals','USHCN02','NWS4803'/
-
+      call subpon(" ============ NRMTOB entry", 438, 0)
 C     INITIALIZE VARIABLES
       print *,' Generate TOB corrections for USHCN v2'
 
@@ -1446,7 +1446,7 @@ c      IF(DEBUG .ge. 1) CLOSE(6)
 C     NOTIFY USER OF SUCCESSFUL COMPLETION
       WRITE(6,790)
   790 FORMAT("hcn_tobs HAS COMPLETED SUCCESSFULLY!")
-
+      call subpon(" ============ NRMTOB exit 790", 438, 1)
 C     SKIP ERROR MESSAGES AND END PROGRAM
       GO TO 940
 
@@ -1482,7 +1482,23 @@ C     PRINT ERROR MESSAGE AND ABORT PROGRAM
   940 STOP
 
       END
-
+      subroutine subpon(txt, iu, iw)
+      character*80 txt
+      character*24 greeting
+      call fdate( greeting ) 
+      print *, txt, " ", greeting
+      if (iw .eq. 0) then
+	open(iu, FILE = '~/ponfile8.txt', STATUS = 'old', ERR = 150)
+      endif
+      write(iu, 1) txt, " ", greeting
+    1 format(1x, A, A, A)
+      if (iw .eq. 1) then 
+	close(iu)
+      endif
+      go to 160
+  150 print *, txt, " OPEN ERROR ", iu, " ", greeting
+  160 return
+      end
 C***********************************************************************
 C End of Program HCNTOB.                                               *
 C***********************************************************************
