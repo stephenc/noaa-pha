@@ -1,4 +1,5 @@
-#!/bin/sh
+
+#!/bin/bash
 
 # upgraded parameter list to include ANNUAL as well as MONTHLY - see inhomog.parm.system.....incl
 
@@ -34,6 +35,12 @@ version=$1
 comptype=$2
 time_def=$3
 net_def=$4
+echo " ----------- CCCCC"
+echo "version: " $version
+echo "comptype: " $comptype
+echo "time_def: " $time_def
+echo "net_def: " $net_def
+echo " ----------- CCCCC"
 
 cwd=`pwd`
 echo "Entering :" $0 $*
@@ -64,7 +71,7 @@ $scripts/$version.sh $binfile $comptype
 echo "End $binfile Compilation"
 
 # clean up
-if [ $comptype == "FAST" ]
+if [ "$comptype" = "FAST" ]
   then
   rm -f $src/*.o
   rm -f $src/*.for

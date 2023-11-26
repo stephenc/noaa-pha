@@ -45,7 +45,8 @@ c     assume candidate list is one line format
       ntype = ''
       otype = ''
       ikeep = 0
-
+      call subpon(" ==== USHCN_FILL_2004 entry     ", 433, 0)
+	call subpon(" ==== USHCN_FILL_2004 entry     ", 6, 0)
       print *,' fillin ushcn & coop stations - ushcn_fill.v4p'
       
 c     units 10, 11, 12, & 13 are reserved for main program! 
@@ -257,8 +258,10 @@ c            print *, cstn, ' less than 10 years - no output'
 c            go to 100
 c          endif  
 c        enddo
-        nwrite = nwrite + 1  
+        nwrite = nwrite + 1
+        write(6, *) ' ************** WRITSTA ush CALL'  
         call writsta(istn,cstn,data,dconf,dflag,cflag,iounit,nc)
+        write(6, *) ' ************** WRITSTA ush CALL RET'
 
   100 end do ! end of stations loop
       goto 200
@@ -272,8 +275,50 @@ c        enddo
 c     close down input files
       close(icunit)
       close(nnunit)
-      end      
-  
+      call subpon(" ==== USHCN_FILL_2004 exit      ", 433, 1)
+	call subpon(" ==== USHCN_FILL_2004 exit      ", 6, 1)
+      end     
+c      subroutine subpon(txt, iu, iw)
+c      character*37 txt
+c      character*24 greeting
+c      call fdate( greeting )
+c      print *, txt, " ", greeting
+c        write(*, *) txt, " ", greeting
+c      if (iu .eq. 0) then
+c        open(iu, FILE = '~/ponfile3.txt', STATUS = 'old', ERR = 150)
+c      endif
+c      write(iu, 1) txt, " ", greeting
+c    1 format(1x, A, A, A)
+c      if (iu .eq. 1) then
+c        close(iu)
+c      endif
+c      go to 160
+c  150 print *, txt, " OPEN ERROR ", iu, " ", greeting
+c  160 return
+c      end 
+      subroutine subpon(txt, iu, iw)
+      character*32 txt
+      character*24 greeting
+      call fdate( greeting )
+      print *, txt, " p ", greeting
+      write(*, *) txt, " * ", greeting
+      write(6, *) txt, " 6 ", greeting
+      if (iw .eq. 0) then
+        open(iu, FILE = '~/ponfile6.txt', STATUS = 'old', ERR = 150)
+        write(iu, 1) greeting, " 4 ", txt
+      endif
+      if (iw .eq. 1) then
+        write(iu, 1) greeting, " 4 ", txt
+        close(iu)
+      endif
+      if (iw .gt. 1) then
+        write(iu, 1) greeting, " 4 ", txt
+      endif
+    1 format(1x, A, A, A)
+      go to 160
+  150 print *, txt, " OPEN ERROR ", iu, " ", greeting
+  160 return
+      end
 c ***********************************************************
       subroutine readsta(istn,cstn,data,dconf,dflag,cflag,isgood,
      *  idunit,cmetafmt,idbg,nc )
@@ -447,6 +492,7 @@ c ***********************************************************
       character*132 dfile, cfile, outdir
 
 c     assume output file has been opened somewhere else
+        write(6, *) ' ************ WRITSTA ush ENTRY ', iounit
       if(istn .le. nc) then
         outdir = candir
       else
@@ -522,9 +568,11 @@ c     write the data in normals format
       enddo
 
   200 close(iounit)
+        write(6, *) ' ****************** WRITSTA ush CALL EXIT A'
       return
       
   300 call perror(' Error: writing output' // dfile)
+	write(6, *) ' ****************** WRITSTA ush CALL EXIT B'
       stop
       
       end
