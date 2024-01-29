@@ -23,14 +23,14 @@ c        4b   18may07   migrated removal of IMD(qc) bad data flag ('f')
 c                         from an obscure AWK script to here. This flag
 c                         should have been taken care of earlier, especially
 c                         if the data was run through the distance/correlation
-c                         algorithm where generation of sub-networks and 
+c                         algorithm where generation of sub-networks and
 c                         removal of stations without sufficient data is
 c                         accomplished.
 c
 c    --------------------------- Official Version USHCNv2 ----------------------
 c    ---------------------------------- 21 Dec 2006 ----------------------------
 c
-c        4a   08jan07   all missing data with UCP "removed flag" are output   
+c        4a   08jan07   all missing data with UCP "removed flag" are output
 c        4    05dec06   added minslpknt to command line parms
 c        3i   29nov06   added nindx for additional paired station loop backs
 c        3h   03nov06   add MMTS (from USHCN v1) option, fixed input element
@@ -38,7 +38,7 @@ c                         error
 c        3g   20oct06   added optional region input so perimeter stations
 c                         are not output
 c        3f   15may06   added ndelete array to the output ("RSTRTv7")
-c        3e   17apr06   brought neglected annual timeres back to operational 
+c        3e   17apr06   brought neglected annual timeres back to operational
 c        3d   05apr06   reinstated Techinque ON/OFF option for itech
 c        3c   08nov05   added confidence interval output
 c        3b   11oct05   fix 3 & 3a for re-entry 2 ("RSTRTv6")
@@ -48,22 +48,22 @@ c        2a   30jun05   iconfirm = 3
 
 c     =======================================================================
       subroutine commline()
-      
+
 c     read the command line parameters given as pairs of "-option value"
       integer iargc, narg
       character*132 argv
-      
+
 c     This include file contains the system parameters
-      INCLUDE 'inhomog.parm.mthly.incl'  
+      INCLUDE 'inhomog.parm.mthly.incl'
 c     command line parameters
       include 'inhomog.comm.mthly.incl'
-      
+
       character*6 iparm
-      
+
 c     initialize command line parameters
       do it = 1, ntech
         itech(it) = 0
-      enddo  
+      enddo
       inel = 0
       idebug = 0
       icorr = 0
@@ -101,7 +101,7 @@ c     incep identifies Peter Thorne's World input
       incep = 0
       minslpknt = 0
       itimeres = -1
-      
+
 c     parameters defined in the confirm-filter study
       print *,''
       print *,' ---- Parameters defined in Confirm-Filter Study ----'
@@ -141,7 +141,7 @@ c        and ignoring the undefined ones.
           call getarg(iarg, argv)
           iarg = iarg + 1
           netfile = argv
-          print *, ' Cand-Ref Network Input file :', 
+          print *, ' Cand-Ref Network Input file :',
      *      netfile(1:lnblnk(netfile))
         else if(argv .eq. '-T') then
 c          call getarg(iarg,argv)
@@ -153,7 +153,7 @@ c            if(itech(i) .eq. 1) then
 c              print *, ctech(i), ' processing option enabled'
 c              iptech = iptech + 1
 c            endif
-c          enddo    
+c          enddo
         else if(argv .eq. '-m') then
           call getarg(iarg, argv)
           iarg = iarg + 1
@@ -189,13 +189,13 @@ c          print *, ' Peter World data Input'
           call getarg(iarg, argv)
           iarg = iarg + 1
           otype = argv
-          print *, ' Processed Stage for Homog Output :', 
+          print *, ' Processed Stage for Homog Output :',
      *      otype(1:lnblnk(otype))
         else if(argv .eq. '-p') then
           call getarg(iarg, argv)
           iarg = iarg + 1
           ctype = argv
-          print *, ' Processed Stage for Candidate Input :', 
+          print *, ' Processed Stage for Candidate Input :',
      *      ctype(1:lnblnk(ctype))
         else if(argv .eq. '-q') then
           call getarg(iarg, argv)
@@ -207,7 +207,7 @@ c          print *, ' Peter World data Input'
           call getarg(iarg, argv)
           iarg = iarg + 1
           unique = argv
-          print *, ' Unique descriptor for this run/rerun :', 
+          print *, ' Unique descriptor for this run/rerun :',
      *      unique(1:lnblnk(unique))
         else if(argv .eq. '-C') then
           call getarg(iarg, argv)
@@ -215,14 +215,14 @@ c          print *, ' Peter World data Input'
           incand = argv
           ilen = lnblnk(incand)
           if(incand(ilen:ilen).ne.'/') incand(ilen+1:ilen+1)='/'
-          print *, ' Base Candidate Input Directory ', 
+          print *, ' Base Candidate Input Directory ',
      *      INCAND(1:lnblnk(INCAND))
           call getarg(iarg, argv)
           iarg = iarg + 1
           outcand = argv
           ilen = lnblnk(outcand)
           if(outcand(ilen:ilen).ne.'/') outcand(ilen+1:ilen+1)='/'
-          print *, ' Base Candidate Output Directory: ', 
+          print *, ' Base Candidate Output Directory: ',
      *      OUTCAND(1:lnblnk(OUTCAND))
         else if(argv .eq. '-O') then
           call getarg(iarg, argv)
@@ -230,7 +230,7 @@ c          print *, ' Peter World data Input'
           odir = argv
           ilen = lnblnk(odir)
           if(odir(ilen:ilen).ne.'/') odir(ilen+1:ilen+1)='/'
-          print *, ' Directory for Test or HOFN output files :', 
+          print *, ' Directory for Test or HOFN output files :',
      *      odir(1:lnblnk(odir))
         else if(argv .eq. '-N') then
           call getarg(iarg, argv)
@@ -238,14 +238,14 @@ c          print *, ' Peter World data Input'
           incoop = argv
           ilen = lnblnk(incoop)
           if(incoop(ilen:ilen).ne.'/') incoop(ilen+1:ilen+1)='/'
-          print *, ' Base Coop Input Directory: ', 
+          print *, ' Base Coop Input Directory: ',
      *      INCOOP(1:lnblnk(INCOOP))
           call getarg(iarg, argv)
           iarg = iarg + 1
           outcoop = argv
           ilen = lnblnk(outcoop)
           if(outcoop(ilen:ilen).ne.'/') outcoop(ilen+1:ilen+1)='/'
-          print *, ' Base Coop Output Directory: ', 
+          print *, ' Base Coop Output Directory: ',
      *      outcoop(1:lnblnk(outcoop))
         else if(argv .eq. '-e') then
           call getarg(iarg,argv)
@@ -258,11 +258,11 @@ c          print *, ' Peter World data Input'
           else if(inel .gt. maxelem .or. inel .lt. 1) then
             print *, ' Element parameter out of range'
             go to 10
-          endif 
+          endif
           icelem = celem(inel)
           iuelem = uelem(inel)
-          print *, ' Processing Meteorological Element:', inel, 
-     *      ' : ', icelem, ' : ', iuelem          
+          print *, ' Processing Meteorological Element:', inel,
+     *      ' : ', icelem, ' : ', iuelem
         else if(argv .eq. '-d') then
           call getarg(iarg,argv)
           iarg = iarg + 1
@@ -276,17 +276,17 @@ c          print *, ' Peter World data Input'
           if(ihyear .lt. 0) then
             itemp = -1 * ihyear
           else if(ihyear .eq. 0) then
-            itemp = begyr  
+            itemp = begyr
           endif
           if(itemp .lt. begyr) then
             print *,' Error: abs(ihyear):',itemp,
      *        ' is less than begyr:', begyr
             goto 10
-          endif  
+          endif
           call getarg(iarg,argv)
           iarg = iarg + 1
           ihtag = argv
-          print *, ' HOFN Input and Graph Output enabled start:', 
+          print *, ' HOFN Input and Graph Output enabled start:',
      *      ihyear, ' Out DTAG: ', ihtag(1:lnblnk(ihtag))
         else if(argv .eq. '-S') then
           call getarg(iarg,argv)
@@ -302,8 +302,8 @@ c          print *, ' Peter World data Input'
           call getarg(iarg,argv)
           iarg = iarg + 1
           read(argv,fmt='(i3)') irandom
-          print *, ' Random Series Test neighbors: ', 
-     *      irandom 
+          print *, ' Random Series Test neighbors: ',
+     *      irandom
         else if(argv .eq. '-F') then
           call getarg(iarg,argv)
           iarg = iarg + 1
@@ -347,10 +347,10 @@ c          print *, ' Reference metafile in GHCN format'
           print *, ' Unknown argument: ', argv, ': skipping'
         endif
       enddo
-      
+
       print *,''
       print *,'  --------- Peter"s World (Switchboard) ----------'
-      
+
 c     Initialize variables in Statcomm common to default
       ndist = 100
       nsnet = 40
@@ -370,7 +370,7 @@ c     Initialize variables in Statcomm common to default
       bic_type = 'bic'
       adjest = 'med'
       adjfilt = 'conf'
-      
+
       call getchkenv('NEIGH_CLOSE ', iparm)
       read(iparm, '(i3)') ndist
       print *,' Number of closest neighbors input: ', ndist
@@ -449,7 +449,7 @@ c      for nstns - add a buffer ~ 1/2 size of nstns (max == maxnstns)
         mypct = 2
       else
         mypct = 3
-      endif  
+      endif
       print *, 'Amp vs Loc percent inclusion & index: ', iparm, mypct
 
       print *,''
@@ -457,36 +457,36 @@ c      for nstns - add a buffer ~ 1/2 size of nstns (max == maxnstns)
 
       if(iregion .eq. 0) then
         print *,' No Region specified - All stations will be output'
-      endif  
-      
+      endif
+
       if(ncand .eq. 0) then
         print *,' NOTE: NO CANDIDATE STATIONS - ALL COOP DATA'
-      endif  
+      endif
 
       if(minslpknt .eq. 0) then
         minslpknt = minlen
         print *,' Minslpknt default (minlen):', minslpknt
-      endif  
+      endif
 
       if(icorr .eq. 0) then
         print *,' All pairs equally weighted in adj. est.'
-      endif  
-      
+      endif
+
       if(icoin .eq. 1) then
         print *,' Co-incident Threshold testing ENABLED'
-      endif  
-      
+      endif
+
       if(immts .eq. 0) then
         print *,' USHCN v1 MMTS not enabled'
-      endif  
-      
+      endif
+
       if(itscale .eq. 0) then
         print *,' Default scaling is hundreths'
         ascale = scale(inel)
       else
 c       Scaling is tenths
         ascale = tscale(inel)
-      endif  
+      endif
 
       if(netfile.ne.'' .and. incand .ne. '' .and. itimeres .ge. 0 .and.
 c     *   (unique .ne. '' .or. jrnlfile .ne. '') .and.
@@ -495,14 +495,14 @@ c     *   (unique .ne. '' .or. jrnlfile .ne. '') .and.
      *   otype.ne.'' .and. ntype.ne.'' .and. qscale .ne. 0. .and.
      *   ndellim .ge. 0 .and.
      *   (itech(1).ne.0.or.itech(2).ne.0.or.itech(3).ne.0)) goto 11
-      
+
    10 print *,' Apply Inhomogeneity techniques to the Monthly Data'
       print *,'     TEMPERATURE ONLY'
       print *,'   REQUIRED PARAMETERS'
       print *,'     -T            Techniques to use (TPR0,TPR2,TPR1)'
       print *,'     -l            Toggle network looping option ON'
       print *,'                   Default is CLASSIC no looping'
-      print *,'     -c ncand      Num USHCN Stations in netfile'      
+      print *,'     -c ncand      Num USHCN Stations in netfile'
       print *,'     -t itimeres   Time resolution (0-ann;1-mthly)'
       print *,'     -Q qscale    Scale for inner-quartile filter'
       print *,'                   = 1.46 (version 52d)'
@@ -540,11 +540,11 @@ c     *   (unique .ne. '' .or. jrnlfile .ne. '') .and.
       print *,'     -P           Toggle Post/Coincident Threshold test'
       print *,'     -W           Recursion ENABLED w/ WMs series input'
       print *,'     -B begstn    first station number to process ',
-     *  '(default - first in file)' 
+     *  '(default - first in file)'
       print *,'     -E endstn    last station number to proces ',
      *  '(default - last in file)'
       print *,'     -F firstnet    first network to process ',
-     *  '(default - first in file)' 
+     *  '(default - first in file)'
       print *,'     -L lastnet    last network to proces ',
      *  '(default - last in file)'
       print *,' NOTE: Raw data files assumed to be parsed into '
@@ -555,7 +555,7 @@ c     *   (unique .ne. '' .or. jrnlfile .ne. '') .and.
       if(incand .eq. '') print *,' Input Candir missing'
       if(outcand .eq. '') print *,' Output Candir missing'
       if(itimeres .lt. 0) print *,' Timeres negative'
-c      if(unique .eq. '' .and. jrnlfile .eq. '') 
+c      if(unique .eq. '' .and. jrnlfile .eq. '')
 c     *  print *,' Define Unique OR Journal'
       if(incoop.eq. '') print *,' Input Coopdir missing'
       if(outcoop.eq. '') print *,' Output Coopdir missing'
@@ -575,32 +575,32 @@ c     *  print *,' Define Unique OR Journal'
 
       return
       end
-      
+
 c     =======================================================================
       subroutine getchkenv(chrstr, iparm)
       character*12 chrstr
       character*6 iparm
-      
+
       call getenv(chrstr(1:lnblnk(chrstr)), iparm)
       if(iparm .eq. '') then
         print *,'ENV: ',chrstr(1:lnblnk(chrstr)),' undefined'
         stop 555
-      endif  
+      endif
       return
-      end   
+      end
 
 c     =======================================================================
       subroutine openunits(version)
       INCLUDE 'inhomog.comm.mthly.incl'
-      
+
       character*132 version
       character*132 outfile
-      
+
 c     Open the output files to accumulate the data for each station
 c       for all the iterations
       do intech = 1, ntech + 1
         if(itech(intech) .eq. 1) then
-          outfile = odir(1:lnblnk(odir)) // version(1:lnblnk(version)) 
+          outfile = odir(1:lnblnk(odir)) // version(1:lnblnk(version))
      *      // '.' // c2tech(intech)
           iounit = bunit + intech
           open(iounit,file=outfile,status='unknown')
@@ -609,7 +609,7 @@ c       for all the iterations
 
       return
       end
-     
+
 c     =======================================================================
       subroutine closeunits()
       INCLUDE 'inhomog.comm.mthly.incl'
@@ -630,7 +630,7 @@ c     =======================================================================
       subroutine readnet(mmunit, nnunit,idunit,rnunit,intr,ieof,
      *  ntstn)
 
-c     WARNING: use only with inhomog.parm.incl & inhomog.comm.mthly.incl 
+c     WARNING: use only with inhomog.parm.incl & inhomog.comm.mthly.incl
 c         AFTER 10Feb04
 
 c     version 3 extends the 10 subnet limit for MM's simulations
@@ -638,7 +638,7 @@ c                                                     26 Apr 04 cw
 c
 c     readnet version 2 is implemented from octpart.v3.f and newer.
 c       BE AWARE: ONLY USE SKILL SCORE ROUTINES VERSION 5 AND ABOVE --- as of
-c         this version the pseudo station numbers for testing now begin with 830000 
+c         this version the pseudo station numbers for testing now begin with 830000
 c         this removes the error of the **** in the last station, but also
 c         offsets the station number by 10 for the older skill score programs!
 c
@@ -662,8 +662,8 @@ c     Reference restart.mod.f95 module for work array allocation
       use restart
 
 c     This include file contains the system parameters
-      INCLUDE 'inhomog.parm.mthly.incl'  
-      
+      INCLUDE 'inhomog.parm.mthly.incl'
+
 c     command line parameters
       include 'inhomog.comm.mthly.incl'
       include 'inhomog.restart.mthly.incl'
@@ -673,19 +673,19 @@ c     command line parameters
 
 c     Indices of all the stations in each neighborhood
       integer indx(maxnstns)
-c     Need to run, initially contains zeros and only when the candidate station 
+c     Need to run, initially contains zeros and only when the candidate station
 c       with that index is read in, does it change to 1
       integer intr(maxstns)
-c     for annual computations      
+c     for annual computations
       integer num(maxstns),rnunit
       real sum(maxstns)
-      
+
       integer indata(13), imiss /-9999/
 
 c     station id and lat/lon/elev
       character*11 ntstn(maxstns),instn
       dimension rStnInfo(maxstns,3)
-      
+
 c     temporary 3220 input arrays
       integer iMonth(iMaxVal),iDay(iMaxVal),iValue(iMaxVal)
       character*3 cRecType
@@ -694,25 +694,25 @@ c     temporary 3220 input arrays
 c      character*132 nfname, hcndir
       character*132 nfname
       character*3 inflag(13)
-      character*1 ichar(21) /'0', '1', '2', '3', '4', '5', '6', '7', 
+      character*1 ichar(21) /'0', '1', '2', '3', '4', '5', '6', '7',
      * '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'/
 
 c     MM's missing value -999.999
       real ammis /-999./
-      
+
 c     variables for text output construction due to G77 inadequacies
       character*132 outstr, tmpstr, curcand
       character*4 curtyp
-      
+
 c     imxskymo is the index in the skyline matrix for filling the data
 c       tested against maxskymo command line input for array size
       integer imxskymo /1/
-      
+
       if(iushcn .eq. 0) then
         istnlen = 11
       else
         istnlen = 6
-      endif    
+      endif
 
 c     set internal = station-year-months
       maxskymo = maxsky * 12
@@ -720,15 +720,15 @@ c     set internal = station-year-months
 c     initialize station ID array & original data array
       ntstn = ''
       orig = amiss
-      
+
 C     initialize incoming temperature flag array
       tflg = '   '
-      
+
 c     initialize need-to-run array for all subnetworks
       intr = 0
-      
+
       ieof = 0
-        
+
 c     For Normals or HOFN type input, read in candidate & network indices
       if(ihyear .gt. 0 .or. irandom .eq. 0) then
 c       read in all subnetworks from the correlation output
@@ -739,7 +739,7 @@ c       read in all subnetworks from the correlation output
             read(nnunit, '(a11)', end=80) instn
           else
             read(nnunit, '(a6)', end=80) instn
-          endif  
+          endif
 c          print *, 'instn ', instn
           read(nnunit, *, end = 80) (indx(i),i=1,nsnet)
           read(nnunit, *, end = 80) adum
@@ -748,19 +748,19 @@ c          print *, 'instn ', instn
           if(k .gt. maxstns) then
             print *,' Number input stations > maxstns ',maxstns
             stop
-          endif  
-          ntstn(k) = instn 
+          endif
+          ntstn(k) = instn
           do i = 1,nsnet
             nindx(k,i) = indx(i)
-          enddo  
+          enddo
         enddo
 
 c       if no subnets have been read, end it here....
    80   if(itarg .eq. 0) goto 200
-  
+
 c       total number of stations (& subnets) == last index
         numsubs = indx(1)
-      endif  
+      endif
 
 c     ---------------------- HOFN data input ------------------------
       if(ihyear .gt. 0) then
@@ -771,7 +771,7 @@ c        print *,' Begyr: ',Begyr,' Endyr: ',Endyr,' IHyear: ',ihyear
 c        print *,' icelem: ', icelem
 c       read 3220 datafiles
         do iStn = 1, numsubs
-                
+
           nfname = incand(1:lnblnk(incand)) //  ntstn(istn)(1:istnlen)
      *      // '.3220'
           open(idunit,FILE=nfname,status='old',err=92)
@@ -784,7 +784,7 @@ c         First and last year (for skyear)
           ieyear = 0
 c         set the skyind of the first station datum (monthly)
           skyind(iStn) = imxskymo
-          
+
           do while (1 .eq. 1)
 c           incoming data in TD3220 format (originally for HOFN)
             read(idunit,1500,end=95) cRecType,dstn,cElmType,iYear,
@@ -796,7 +796,7 @@ c           incoming data in TD3220 format (originally for HOFN)
               print *, nfname, ' is NOT monthly data'
               goto 95
             endif
-            
+
             if(iYear .ge. BegYr .and. iYear .le. EndYr ) then
 c             Keep track of begin/end years
               if(ibyear .eq. 9999) ibyear = iYear
@@ -809,9 +809,9 @@ c             check the skyind - (room for another year of data?)
                 stop
               endif
 
-              if((cElmType .eq. 'MMXT' .and. icelem .eq. '_max' ) .or. 
-     *          (cElmType .eq. 'MMNT' .and. icelem .eq. '_min')) then 
-        
+              if((cElmType .eq. 'MMXT' .and. icelem .eq. '_max' ) .or.
+     *          (cElmType .eq. 'MMNT' .and. icelem .eq. '_min')) then
+
                 do iNVal=1,iTotlVal
                   iskymo = imxskymo + iMonth(iNVal) - 1
                   orig(iskymo) = iValue(iNVal)/ascale
@@ -820,21 +820,21 @@ c             check the skyind - (room for another year of data?)
               endif !End condition "TMAX or TMIN"
             endif !End condition "Year"
    90     end do
-          
+
    92     call perror(' Cannot open HOFN(3200) data: ' // nfname)
 
 c   95     print *, ntstn(istn), ntot
    95     close(idunit)
           if(ibyear .ne. 9999) then
             skyear(1, iStn) = ibyear
-            skyear(2, iStn) = ieyear            
+            skyear(2, iStn) = ieyear
           else
             skyear(1, iStn) = imiss
             skyear(2, iStn) = imiss
           endif
 c         adjust working sky index for next station
           imxskymo = skyind(iStn) + (ieyear - ibyear + 1) * 12
-          
+
         end do
 
   100   numsubs = iStn - 1
@@ -856,30 +856,30 @@ c       changed for the GHCNMv2 station and GHCN-daily filename formats
           endif
           if(iushcn .eq. 0) then
             if(irecurse .eq. 0) then
-              nfname = curcand(1:lnblnk(curcand)) // 
-     *          curtyp(1:lnblnk(curtyp)) // '/' // 
-     *          ntstn(itarg)(1:istnlen) // '.' // 
+              nfname = curcand(1:lnblnk(curcand)) //
+     *          curtyp(1:lnblnk(curtyp)) // '/' //
+     *          ntstn(itarg)(1:istnlen) // '.' //
      *          curtyp(1:lnblnk(curtyp)) // '.' // icelem
             else
-              nfname = curcand(1:lnblnk(curcand)) // 'WMs.' // 
-     *          curtyp(1:lnblnk(curtyp)) // '/' // 
-     *          ntstn(itarg)(1:istnlen) // '.WMs.' // 
+              nfname = curcand(1:lnblnk(curcand)) // 'WMs.' //
+     *          curtyp(1:lnblnk(curtyp)) // '/' //
+     *          ntstn(itarg)(1:istnlen) // '.WMs.' //
      *          curtyp(1:lnblnk(curtyp)) // '.' // icelem
             endif
           else
             if(irecurse .eq. 0) then
-              nfname = curcand(1:lnblnk(curcand)) // 
-     *          curtyp(1:lnblnk(curtyp)) // '/' // 
+              nfname = curcand(1:lnblnk(curcand)) //
+     *          curtyp(1:lnblnk(curtyp)) // '/' //
      *          ntstn(itarg)(1:istnlen) // '_' // iuelem // '.' //
      *          curtyp(1:lnblnk(curtyp))
             else
-              nfname = curcand(1:lnblnk(curcand)) // 'WMs.' // 
+              nfname = curcand(1:lnblnk(curcand)) // 'WMs.' //
      *          curtyp(1:lnblnk(curtyp)) // '/' //
-     *          ntstn(itarg)(1:istnlen) // '_' // iuelem 
+     *          ntstn(itarg)(1:istnlen) // '_' // iuelem
      *          // '.WMs.' // curtyp(1:lnblnk(curtyp))
             endif
           endif
-          if(idebug .ge. 2) print *,nfname  
+          if(idebug .ge. 2) print *,nfname
 
 c         Open temporary i/o unit for data input
           open(idunit, FILE = nfname, err = 130)
@@ -901,19 +901,19 @@ c         set the skyind of the first station datum (monthly)
               read(idunit, '(a6,i1,i4,12(i6,a1))', end = 140) instn,
      *          isrc, iyear,(indata(imth),inflag(imth),imth=1,12)
 c              write(6, '(a6,i1,i4,12(i6,a1))') instn,
-c     *          isrc, iyear,(indata(imth),inflag(imth),imth=1,12)              
+c     *          isrc, iyear,(indata(imth),inflag(imth),imth=1,12)
             endif
             if(iyear .ge. begyr .and. iyear .le. endyr) then
 c             Keep track of begin/end years
               if(ibyear .eq. 9999) ibyear = iYear
               ieyear = iYear
               imxskymo = skyind(iStn) + (ieyear - ibyear) * 12
-c             check the skyind 
+c             check the skyind
               if(imxskymo+11 .gt. maxskymo) then
                 print *,'Incoming data exceeds Skyline Maximum:',
      *            istn, skyind(istn), maxskymo
                 stop
-              endif  
+              endif
 
               nval = 0
               do imth = 1, 12
@@ -923,8 +923,8 @@ c               convert external format and missing to internal values
 c                   filter out the NEW Integrated Monthly Dataset (after QC)
                 if(indata(imth) .eq. IMISS) then
                   orig(iskymo) = AMISS
-                  inflag(imth)(1:2) = ' M'     
-                else if (iushcn .eq. 0 .and. 
+                  inflag(imth)(1:2) = ' M'
+                else if (iushcn .eq. 0 .and.
      *            inflag(imth)(2:2) .ne. " ")then
 c                 -------  GHCN Input & flag decoding
                   orig(iskymo) = AMISS
@@ -948,11 +948,11 @@ c         make sure to close this unit!!!
   140     close(idunit)
           if(idebug .ge. 2)
      *      print *, istn, skyind(istn), ibyear, ieyear, imxskymo
-          
+
 c          print *,' Indata: ',instn, itot
           if(ibyear .ne. 9999) then
             skyear(1, iStn) = ibyear
-            skyear(2, iStn) = ieyear            
+            skyear(2, iStn) = ieyear
 c           adjust working sky index for next station
             imxskymo = skyind(iStn) + (ieyear - ibyear + 1) * 12
           else
@@ -962,11 +962,11 @@ c           if no data AT ALL - leave a year worth of space......
             imxskymo = imxskymo + 12
           endif
 
-  150   end do  
-  
+  150   end do
+
       else
         numsubs = maxstns
-              
+
 c       read Mmenne random series data
   160   if(irandom .gt. 0) then
 c         Annual series are positive ****DISABLED****
@@ -983,20 +983,20 @@ c         warning: assume 1200 values per candidate-network
             if(iskyoff .ne. imoff) then
               print *,'Monthly input and YYYY/MM out of sync'
               stop
-            endif  
+            endif
 c           convert MM's missing to internal missing
             do iskymo = 1, numsubs*itotmo
               if(orig(iskymo).le.ammis)then
                 orig(iskymo)=amiss
-              endif    
-            enddo  
-          enddo  
+              endif
+            enddo
+          enddo
         endif
 
 c       read the stations and their nieghbors (1st diff corr sort)
   180   do istn = 1, numsubs
           intr(istn) = 1
-c         set the skyind and skyear 
+c         set the skyind and skyear
           skyind(iStn) = (iStn-1) * itotmo + 1
           skyear(1,iStn) = begyr
           skyear(2,iStn) = endyr
@@ -1005,26 +1005,26 @@ c         set the skyind and skyear
             read(nnunit, '(a11)', end=190) ntstn(istn)
           else
             read(nnunit, '(a6)', end=190) ntstn(istn)
-          endif  
+          endif
           read(nnunit, *, end = 190) (indx(i),i=1,nsnet)
           read(nnunit, *,end=190) adum
           k = indx(1)
           do i = 1,nsnet
             nindx(k,i) = indx(i)
-          enddo  
-        enddo  
+          enddo
+        enddo
 
 c       test station number against begin and end stations
 c        read(ntstn(1), fmt='(i6)') istn
 c        if(istn .lt. begstn) goto 160
 c        if(istn .gt. endstn) goto 190
-        
-      endif  
+
+      endif
 
 c      print *,'Last station (subnet) index:',numsubs
 c      print *,' readnet orig(49,1950,1):',orig(49,1950,1)
       return
-      
+
   190 print *,' Candidate network past end station'
       ieof = 1
       return
@@ -1032,7 +1032,7 @@ c      print *,' readnet orig(49,1950,1):',orig(49,1950,1)
   200 print *,' End of candidate network records'
       ieof = 1
       return
-    
+
       end
 
 c     =======================================================================
@@ -1054,28 +1054,28 @@ c     fix up to write out results....
 c     current data array for all stations
 c      real   montemp(maxstns,begyr:endyr,13)
 c     original input flags for all stations
-c      character*1 monflag(maxstns,begyr:endyr,13)      
+c      character*1 monflag(maxstns,begyr:endyr,13)
 c
 c      character*6 ntstn(maxstns),shstn(maxnstns)
 c      character*1 adjflag(begyr:endyr,13)
 c      real outtemp(begyr:endyr,13),adjtemp(begyr:endyr,13)
-c 
+c
 c            do iy = begyr, endyr
 c              do im = 1, 13
 c                adjflag(iy,im) = ' '
 c                adjtemp(iy,im) = amiss
-c                if(iy .ge. istpyr .and. 
+c                if(iy .ge. istpyr .and.
 c     *            montemp(itarg, iy, 13) .ne. amiss) then
 c                  outtemp(iy,im) = montemp(itarg, iy, im)
 c                  write(iounit,*) ' Cand: ', itarg, ntstn(itarg), iy, im,
 c     *              outtemp(iy,im)
 c                else
-c                 outtemp(iy,im) = amiss  
-c                endif  
+c                 outtemp(iy,im) = amiss
+c                endif
 c              enddo
 c            enddo
-c              
-c          call writsta(shstn(1), outtemp, monflag, adjtemp, adjflag, 
+c
+c          call writsta(shstn(1), outtemp, monflag, adjtemp, adjflag,
 c     *      'KW', idunit)
 
       include 'inhomog.comm.mthly.incl'
@@ -1091,16 +1091,16 @@ c      include 'inhomog.restart.mthly.incl'
      *  cval(begyr:endyr,NMTH)
       character*132 dfile, dpath, strpath
       integer idval(NMTH), iprnt(begyr:endyr)
-      
+
       if(iushcn .eq. 0) then
         istnlen = 11
       else
         istnlen = 6
-      endif    
+      endif
 
 c     data file first
       if(itarg .le. ncand) then
-        dpath = outcand(1:lnblnk(outcand)) 
+        dpath = outcand(1:lnblnk(outcand))
         strpath = 'HCNOutDir: '
       else
         dpath = outcoop(1:lnblnk(outcoop))
@@ -1109,7 +1109,7 @@ c     data file first
       ostr = otag // 's.' // otype(1:lnblnk(otype))
       if(iushcn .eq. 0) then
         dfile = dpath(1:lnblnk(dpath))// ostr(1:lnblnk(ostr)) //
-     *    '/' //cstn(1:istnlen) // '.' // ostr(1:lnblnk(ostr)) // 
+     *    '/' //cstn(1:istnlen) // '.' // ostr(1:lnblnk(ostr)) //
      *    '.' // icelem
         strpath = strpath(1:lnblnk(strpath)) // ostr(1:lnblnk(ostr)) //
      *    '/' // cstn(1:istnlen) // '.' // ostr(1:lnblnk(ostr)) //
@@ -1125,13 +1125,13 @@ c     data file first
 
 c     open output file
       open(iounit, FILE=dfile, err= 300)
-      
+
 c     HOLD !!!!!!!!!!!!!!!!!!!!!!
 c     write the data in HCN format
 c      do iy = 1, endyr - begyr + 1
 c        write(iounit,20,ERR=300) istn, iy + begyr - 1, inel,
 c     *    (dval(im,iy),dflag(iy,im),im = 1,NMTH)
-c   20   FORMAT(I6.6,1X,I4,1X,I1,'F',13(F6.2,1x,a1,2x))           
+c   20   FORMAT(I6.6,1X,I4,1X,I1,'F',13(F6.2,1x,a1,2x))
 c      end do
 
 c     write the data in Normals format
@@ -1155,7 +1155,7 @@ c           The PHA has deleted the data value - standardize qflag
               iunstbl = iunstbl + 1
             else if(qflag .eq. 'r') then
               ichgptm = ichgptm + 1
-            else 
+            else
               iunknown = iunknown + 1
             endif
             dflag(iy,im)(1:1) = ' '
@@ -1165,10 +1165,10 @@ c           The PHA has deleted the data value - standardize qflag
             idval(im) = -9999
             dflag(iy,im) = '   '
           else
-            idval(im) = nint(dval(iy,im)*ascale) 
+            idval(im) = nint(dval(iy,im)*ascale)
             ndat = ndat + 1
           endif
-        enddo   
+        enddo
         if(ndat .gt. 0) then
           if(iushcn .eq. 0) then
             write(iounit,1000,ERR=300) cstn, inel, iy,
@@ -1180,12 +1180,12 @@ c           The PHA has deleted the data value - standardize qflag
  1001       FORMAT(a6,i1,I4,13(i6,a1))
           endif
           iprnt(iy) = 1
-        endif  
+        endif
       enddo
       close(iounit)
       write(*,'(" Writing: ",a,5i4)') strpath(1:lnblnk(strpath)),
      *  ishort, idelete, iunstbl, ichgptm, iunknown
-      
+
 c     skip printing out addtional info
       goto 100
 
@@ -1195,13 +1195,13 @@ c     adjustment file next
      *    '/' // cstn // '.' // ostr(1:lnblnk(ostr)) // '.' // icelem
 c     open output file
       open(iounit, FILE=dfile, err= 300)
-      
+
 c     HOLD !!!!!!!!!!!!!!!!!!!!!!
 c     write the data in HCN format
 c      do iy = 1, endyr - begyr + 1
 c        write(iounit,20,ERR=300) istn, iy + begyr - 1, inel,
 c     *    (dval(im,iy),dflag(iy,im),im = 1,NMTH)
-c   20   FORMAT(I6.6,1X,I4,1X,I1,'F',13(F6.2,1x,a1,2x))           
+c   20   FORMAT(I6.6,1X,I4,1X,I1,'F',13(F6.2,1x,a1,2x))
 c      end do
 
 c     write the data in Normals format
@@ -1211,9 +1211,9 @@ c     write the data in Normals format
             if(aval(iy,im) .lt. AMISS + 1.0 ) then
               idval(im) = -9999
             else
-              idval(im) = nint(aval(iy,im)*ascale) 
+              idval(im) = nint(aval(iy,im)*ascale)
             endif
-          enddo   
+          enddo
           write(iounit,1000,ERR=300) cstn, inel, iy,
      *      (idval(im),aflag(iy,im), im=1,NMTH)
         endif
@@ -1226,7 +1226,7 @@ c     err of adj file next
      *    '/' // cstn // '.' // ostr(1:lnblnk(ostr)) // '.' // icelem
 c     open output file
       open(iounit, FILE=dfile, err= 300)
-      
+
 c     write the data in Normals format
       do iy = begyr, endyr
         if(iprnt(iy) .eq. 1) then
@@ -1234,24 +1234,24 @@ c     write the data in Normals format
             if(cval(iy,im) .lt. AMISS + 1.0 ) then
               idval(im) = -9999
             else
-              idval(im) = nint(cval(iy,im)*ascale) 
+              idval(im) = nint(cval(iy,im)*ascale)
             endif
-          enddo   
+          enddo
           write(iounit,1000,ERR=300) cstn, inel, iy,
      *      (idval(im),aflag(iy,im), im=1,NMTH)
         endif
       enddo
   100 close(iounit)
       return
-      
+
   200 print *,' Perimeter station not output: ', cstn
       return
-      
+
   300 call perror(' ERROR: writing output: ' // dfile)
       stop
-      
+
       end
-  
+
 c     =======================================================================
       subroutine write_restart(icpos)
 
@@ -1271,19 +1271,19 @@ c        2 = Just before the confirmfilt call
 c        3 = Just before the Final stnhist call
       integer icpos
 c     on a restart is equivalent to rentry
-      
+
 c     take out inhomog.comm.mthly.incl as soon as possible
 c      integer nloop
-      
+
       character*132 rsfile
-      
+
 c      character*64 unique
-     
-      write(rsfile,1000) unique(1:lnblnk(unique)), network, method, 
+
+      write(rsfile,1000) unique(1:lnblnk(unique)), network, method,
      *  nloop, icpos
  1000 format(a,'.',i4.4,'_',i1,'_',i2.2,'_',i1)
- 
-c     In the following code, the currently commented lines are the 
+
+c     In the following code, the currently commented lines are the
 c       g77 implementation and the enabled lines are the LF95 implementation
 c      open(40,file=rsfile,access='direct',recl=1,status='unknown')
       open(40,file=rsfile,FORM='UNFORMATTED',status='unknown')
@@ -1294,11 +1294,11 @@ c     these are the variables that define the array sizes (checked on read)
 c      write(40, rec=9) maxstns, nstns, begyr, endyr, ntech, ninh
       write(40) maxstns, nstns, begyr, endyr, ntech, ninh
 c     these are the settings for the process variables and the arrays
-c      write(40,rec=33) network, method, nloop, icpos, nht, lht, ntr, 
-c     *    itimeres, nhits, sahist, temp, schgpt, nchgpt, ntest, nfound, 
+c      write(40,rec=33) network, method, nloop, icpos, nht, lht, ntr,
+c     *    itimeres, nhits, sahist, temp, schgpt, nchgpt, ntest, nfound,
 c     *    nspan, ndelete, nindx, tflg
-      write(40) network, method, nloop, icpos, nht, lht, ntr, 
-     *    itimeres, nhits, sahist, temp, schgpt, nchgpt, ntest, nfound, 
+      write(40) network, method, nloop, icpos, nht, lht, ntr,
+     *    itimeres, nhits, sahist, temp, schgpt, nchgpt, ntest, nfound,
      *    nspan, ndelete, nindx, tflg
       close(40)
       print *, ' JOURNAL WRITTEN: ', rsfile(1:lnblnk(rsfile))
@@ -1318,7 +1318,7 @@ c      subroutine read_restart(jrnlfile, rsnet, nloop, unique)
 
 c     these are read from the restart journal and checked against the
 c       values set in the current code
-      
+
 c     need network (output) seperated from rsnet (input)
       integer rsnet
       character*8 inver
@@ -1326,11 +1326,11 @@ c     need network (output) seperated from rsnet (input)
 
 c     take out inhomog.comm.mthly.incl as soon as possible
 c      integer nloop
-      
+
       print *,' Unique identifier from Journal: ',
-     *  jrnlfile(1:lnblnk(jrnlfile)-12) 
-     
-c     In the following code, the currently commented lines are the 
+     *  jrnlfile(1:lnblnk(jrnlfile)-12)
+
+c     In the following code, the currently commented lines are the
 c       g77 implementation and the enabled lines are the LF95 implementation
 c      open(40,file=jrnlfile,access='direct',recl=1,status='unknown')
       open(40,file=jrnlfile,FORM='UNFORMATTED',status='unknown')
@@ -1343,25 +1343,25 @@ c      read(40,rec=1) inver
         print *,' Journal: ',inver
         print *,' Current: ', resver
         stop
-      endif  
+      endif
 c     these are the variables that define the array sizes (checked on read)
 c      read(40, rec=9) inmax, instns, inbeg, inend, intech, ininh
       read(40) inmax, instns, inbeg, inend, intech, ininh
-      if(inmax .ne. maxstns .or. instns .ne. nstns .or. 
-     *  inbeg .ne. begyr .or. inend .ne. endyr .or. 
-     *  intech .ne. ntech .or. ininh .ne. ninh) then 
+      if(inmax .ne. maxstns .or. instns .ne. nstns .or.
+     *  inbeg .ne. begyr .or. inend .ne. endyr .or.
+     *  intech .ne. ntech .or. ininh .ne. ninh) then
         print *,' ------------- Restart Error 2 ---------- '
         print *,' Journal vs. Current Parameter Mismatch'
         print *,'            maxstn, nstns, begyr, endyr'
         print *,' Journal: ', inmax, instns, inbeg, inend, intech, ininh
         print *,' Current: ', maxstns, nstns, begyr, endyr, ntech, ninh
         stop
-      endif  
+      endif
 c     these are the settings for the process variables and the arrays
-c      read(40,rec=33,err=100) network, method, nloop, rentry, nht, lht, 
+c      read(40,rec=33,err=100) network, method, nloop, rentry, nht, lht,
 c     *     ntr, itimeres, nhits, sahist, temp, schgpt, nchgpt, ntest,
 c     *     nfound, nspan, ndelete, nindx, tflg
-      read(40) network, method, nloop, rentry, nht, lht, 
+      read(40) network, method, nloop, rentry, nht, lht,
      *     ntr, itimeres, nhits, sahist, temp, schgpt, nchgpt, ntest,
      *     nfound, nspan, ndelete, nindx, tflg
       close(40)
@@ -1375,31 +1375,31 @@ c     *     nfound, nspan, ndelete, nindx, tflg
       print *,' >>> Nloop: ', nloop
       print *,' >>> Rentry: ', rentry
       print *,' >>> Timeres: ', itimeres
-      
+
 c      print *,' nhits>0 read: ',maxstns, nmo
 c      do istn = 1, maxstns
 c        do imo = 1, nmo
 c          if(nhits(istn, imo) .ne. 0) print *,istn, imo, nhits(istn,imo)
 c        enddo
-c      enddo    
-      
+c      enddo
+
 c      do k = 1, maxstns
-c        do istn = 2, maxnstns                  
+c        do istn = 2, maxnstns
 c          do imo = 1, nmo
 c            do it = 1, intech
 c              ichg = nspan(k,istn,imo,it)
-c              if(ichg .gt. 0 .or. nfound(k,istn,imo,it) .ne. '0') 
+c              if(ichg .gt. 0 .or. nfound(k,istn,imo,it) .ne. '0')
 c     *          print *,'NSPAN:',k,istn,imo,it,ichg,
 c     *            ' ',nfound(k,istn,imo,it)
 c            enddo
-c          enddo    
+c          enddo
 c        enddo
-c      enddo  
-      
+c      enddo
+
    30 return
-   
+
   100 print *,' Error in reading process variables and arrays'
       stop
       end
-          
-        
+
+
