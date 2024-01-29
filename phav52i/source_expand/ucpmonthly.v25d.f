@@ -839,7 +839,6 @@ c       Read in one complete network - all candidates and their neighborhoods
 c       nhits is used to set a chgpt at any gap in the data > minlen 
 c         contiguous months.                                  22Sep05
         call readnet(mmunit,nnunit,idunit,rnunit,intr,ieof,ntstn)
-        if(ieof .ne. 0) goto 999
         network = network + 1
 c       if restart has been initiated read input up to the restart network
         if(rsnet .gt. network) go to 10

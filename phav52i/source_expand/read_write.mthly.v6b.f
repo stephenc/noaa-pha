@@ -755,8 +755,9 @@ c          print *, 'instn ', instn
           enddo
         enddo
 
+   80   ieof = 1
 c       if no subnets have been read, end it here....
-   80   if(itarg .eq. 0) goto 200
+        if(itarg .eq. 0) goto 200
 
 c       total number of stations (& subnets) == last index
         numsubs = indx(1)
