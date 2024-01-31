@@ -653,7 +653,8 @@ c       nnunit is the unit number of the network definition file
 c       idunit is the unit number for the data files
 c       orig is the data array in stn,year,mth index order
 c       ieof returns whether the end of file has been reached in the
-c          network definition file (=1) or not (=0)
+c          network definition file (=1 if no records read, =2 if
+c          station records were read and the end of file reached) or not (=0)
 
 c     cstn is the desired station id
 c     ista is the station's index
@@ -755,7 +756,7 @@ c          print *, 'instn ', instn
           enddo
         enddo
 
-   80   ieof = 1
+   80   ieof = 2
 c       if no subnets have been read, end it here....
         if(itarg .eq. 0) goto 200
 
