@@ -1,0 +1,5 @@
+.git/
+.gitignore
+data/
+data-*/
+README.adoc

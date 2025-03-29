@@ -1,0 +1,60 @@
+c       Copied from skyline.0.9.0 (355)
+C       This is a resource file containing parameter settings for the
+c         following processing routines in the USHCN_2002 project
+c
+c         ushcn_dist_2000.f
+c         ushcn_corr_2000.v1b.f
+c         ushcn_tobs_2000.v2.f
+c
+c       GHCNMv4 (ISTI) pushes the limit
+        integer maxnets
+        parameter (maxnets = 41000)
+
+c       Begin year for all series (1701)
+        integer ibegyr
+        parameter (ibegyr = 1701)
+
+c       End year for the USHCN series
+        integer ilstyr
+        parameter (ilstyr = 2030)
+
+c       Missing data definition
+        real amiss
+        parameter (amiss = -99.99)
+
+c       Total Number of years
+        parameter (numyr = ilstyr - ibegyr + 1)
+
+c     number of elements defined
+      parameter (maxelem = 5)
+
+c     celem refers to the cdtype and otype in perhomog.comm.incl
+c        - must be defined as in the normals file names
+c      character*4 celem(maxelem)/'_max','_min','_avg','_pcp','_pw0',
+c     *  '_pw1' /
+      character*4 celem(maxelem)/'tmax','tmin','tavg','prcp','tdtr'/
+
+C ------- Following code adaptation for Peter's Worlds ----------
+
+c       Number of stations in the nearest neighbor (dist) file
+c        for Peter World Tests (NEIGH_CLOSE)
+         integer ndist
+
+c       Number of network stations (including candidate!)
+c       NOTE: This variable must be coordinated with its counterpart in
+c               the inhomog.parm.incl file (NEIGH_FINAL)
+        integer nstns
+
+c       Half the Minimum number of pairwise observations per year-month
+c         for removing low-corr stations (MIN_STNS)
+        integer minstns
+
+c       Correlation method to determine station network (NEIGH_CORR)
+        character*5 corr_type
+
+      common /statcomm/ ndist, nstns, minstns, corr_type
+
+
+c     conversion for the integer inputs and internal float arrays
+c     current GHCNMv3 and USHCNv2 are 0.01C & 0.01cm, (same for pw?)
+      real scale(maxelem)/100., 100., 100., 100., 100./

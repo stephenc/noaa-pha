@@ -1,0 +1,31 @@
+c     Copied from Skyline.0.9.0 (355)
+c     -----------parameter definitions ------------
+c      parameter (maxnets = 9000, minmths = 15, nsel = 5, minstns = 7)
+c     change minmths to 10 for the GHCN precip 20060118
+c      parameter (maxnets = 12000, minmths = 10, nsel = 5, minstns = 7)
+c     change minmths to 8 for the GHCN canada 20070417
+c      parameter (maxnets = 12000, minmths = 8, nsel = 5, minstns = 7)
+c     whole set of precip (+ only) stations
+c      parameter (maxnets = 16000, minmths = 8, nsel = 5, minstns = 7)
+c     Peter's World.... minstns is a variable (see prehomog.parm.incl)
+c      parameter (maxnets = 23000, minmths = 4, nsel = 5)
+c     GHCNMv4 (ISTI).... minstns is a variable (see prehomog.parm.incl)
+c      maxnets moved to prehomog.parm.incl - 12july2012
+      parameter (minmths = 4, nsel = 5)
+
+c     the minimum correlation for a station to be included in network
+c       this value is soo low because even a moderate changepoint can
+c       reduce correlation dramatically.
+c      parameter (corrlim = .1)
+
+c     ------------ common information ---------------
+      integer irflag(maxnets,12)
+      real rdata(maxnets,ibegyr:ilstyr,12), cdata(ibegyr:ilstyr,12)
+      real rbim(maxnets,12), rbis(maxnets,12)
+      character*2 rflags(maxnets,ibegyr:ilstyr,12)
+
+c     file names for the network stations and the candidate
+      character*256 nfname(maxnets)
+      
+      common/corrblk/irflag, rdata, rbim, rbis, cdata, nfname, rflags
+

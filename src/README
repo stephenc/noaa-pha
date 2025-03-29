@@ -1,0 +1,12 @@
+03/17/2025
+
+Source Code for GHCNM v4, pulled from internal Git: 03/17/2025
+
+Note: These source code directories and files are provided for inspection, but 
+without any support for compilation, testing, and/or installation.  These files
+are part of the GHCNM dataset production project.  This project is internal
+to NOAA systems, and at this time, is not meant to compile, install, and/or run 
+on any system outside of a NOAA internal network.
+
+GHCNM team
+ncdc.ghcnm@noaa.gov
