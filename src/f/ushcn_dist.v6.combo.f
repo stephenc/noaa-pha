@@ -477,7 +477,6 @@ c***********************************************************************
 c end of program hcndis.                                               *
 c***********************************************************************
 
-
 c***********************************************************************
 c                             function gcd                             *
 c                                                                      *
@@ -491,8 +490,91 @@ c   1.1       sun workstation version                       01/21/1994 *
 c                                                                      *
 c   1.0       original                                                 *
 c                                                                      *
-c usage:  sortn(double precision dist(numstn,numstn), integer nstn,    *
-c               integer nsort, integer ptr(numstn,numstn))             *
+c author:  claude williams                                             *
+c                                                                      *
+c modifiers:  pam hughes                                               *
+c             david bowman                                             *
+c                                                                      *
+c usage:  gcd(double precision alat1, double precision alon1,          *
+c             double precision alat2, double precision alon2)          *
+c                                                                      *
+c description:  this program calculates the distance in kilometers     *
+c               between two stations, given the latitude and longitude *
+c               of each.                                               *
+c                                                                      *
+c notes:  none.                                                        *
+c                                                                      *
+c results:  returns distance in kilometers between two stations.       *
+c                                                                      *
+c variables:                                                           *
+c                                                                      *
+c   alat1      latitude of first station                               *
+c                                                                      *
+c   alat2      latitude of second station                              *
+c                                                                      *
+c   alon1      longitude of first station                              *
+c                                                                      *
+c   alon2      longitude of second station                             *
+c                                                                      *
+c   cd2r       degrees to radians constant                             *
+c                                                                      *
+c   radius     radius of earth in kilometers                           *
+c                                                                      *
+c   rdlat      intermediate distance calculation                       *
+c                                                                      *
+c   rdlon      intermediate distance calculation                       *
+c                                                                      *
+c   rolat      intermediate distance calculation                       *
+c                                                                      *
+c   temp       intermediate distance calculation                       *
+c                                                                      *
+c***********************************************************************
+
+      function gcd(alat1,alon1,alat2,alon2)
+
+c     initialize constants
+
+      cd2r = 3.14159265 / 180.
+      radius = 6371.
+
+c     compute distance between two stations
+
+      rolat = cd2r * (alat1 + alat2) / 2.
+      rdlat = cd2r * (alat1 - alat2)
+c     watchout for different hemispheres
+      aldiff = alon1 - alon2
+      if(aldiff .lt. -180.) aldiff = aldiff + 360.
+      if(aldiff .gt. 180.) aldiff = aldiff - 360.
+
+      rdlon = cd2r * aldiff
+      temp = acos(cos(rdlat) * cos(rdlon * cos(rolat)))
+      gcd = abs(temp) * radius
+
+      return
+
+      end
+
+c***********************************************************************
+c end of function gcd.                                                 *
+c***********************************************************************
+
+c***********************************************************************
+c                           subroutine sortn                           *
+c                                                                      *
+c date of last change:  24 march 1994                                  *
+c                                                                      *
+c modifier:  david bowman                                              *
+c                                                                      *
+c version     modification                                     date    *
+c -------     ------------                                  ---------- *
+c   1.1       sun workstation version                       03/24/1994 *
+c                                                                      *
+c   1.0       original                                                 *
+c                                                                      *
+c author:  claude williams                                             *
+c                                                                      *
+c modifiers:  pam hughes                                               *
+c             david bowman                                             *
 c                                                                      *
 c description:  this subroutine determines and sorts the nsort nearest *
 c               neighbors for each candidate stations.                  *

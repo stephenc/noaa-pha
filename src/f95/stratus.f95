@@ -390,15 +390,22 @@ subroutine indices(X,Y)
       if (size(X)/=size(Y)) stop "ERROR: stratus/indices: X and Y input arrays must be same size"
       N=size(X) 
       I = 1
-10    K = I
-20    J = I
-      Y(I) = I
-      I = I + 1
-      IF ( J .EQ. N ) GOTO 30
-      IF ( X(I) .GE. X(J) ) GOTO 20
-      W(K) = I
-      GOTO 10
-  30  IF ( K .EQ. 1 ) RETURN
+      do
+          K = I
+          do
+              J = I
+              Y(I) = I
+              I = I + 1
+              IF (J .EQ. N) then
+                  if (K .EQ. 1) return
+                  exit
+              END IF
+              IF (X(I) .GE. X(J)) cycle
+              W(K) = I
+              exit
+          end do
+          IF (K .EQ. 1) RETURN
+      end do
       W(K) = N + 1
   40  M = 1
       L = 1
@@ -1869,9 +1876,10 @@ logical ::  MX,MY,NX,NY
 ! VALUE =  1 if point is inside polygon
 
       N=SIZE(YY)
-6     DO 1 I=1,N
-      X(I)=XX(I)-PX
-1     Y(I)=YY(I)-PY
+6     DO I = 1, N
+        X(I) = XX(I) - PX
+        Y(I) = YY(I) - PY
+      END DO
       VALUE=-1
       DO 2 I=1,N
       J=1+MOD(I,N)

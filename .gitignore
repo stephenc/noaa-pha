@@ -1,2 +1,6 @@
-data/
-data-*/
+/build/pha-unit-test.log
+/bin
+/obj
+/deps.mk
+/fort.7
+/fort.8

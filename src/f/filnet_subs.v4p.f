@@ -1412,6 +1412,58 @@ C***********************************************************************
 
 
 C***********************************************************************
+C                           Subroutine hsort                           *
+C                                                                      *
+c   Heapsort (see Numerical Recipes (p.231)- C. Williams 19Jan2001
+C                                                                      *
+C***********************************************************************
+
+      SUBROUTINE HSORT(ARR,NVAL)
+
+      dimension ARR(NVAL)
+
+      l = NVAL/2 + 1
+      ir = NVAL
+
+   10 continue
+      if(l .gt. 1) then
+        l = l - 1
+        rARR = ARR(l)
+      else
+        rARR = ARR(ir)
+        ARR(ir) = ARR(1)
+        ir = ir - 1
+        if(ir .eq. 1) then
+          ARR(1) = rARR
+          return
+        endif
+      endif
+      i = l
+      j = l+l
+   20 if(j .le. ir) then
+        if(j .lt. ir) then
+          if(ARR(j) .lt. ARR(j+1)) j = j + 1
+        endif
+        if(rARR .lt. ARR(j)) then
+          ARR(i) = ARR(j)
+          i = j
+          j = j + j
+        else
+          j = ir + 1
+        endif
+        go to 20
+      endif
+
+      ARR(i) = rARR
+      go to 10
+      end
+
+C***********************************************************************
+C End of Subroutine SORTN.                                             *
+C***********************************************************************
+
+
+C***********************************************************************
 C                           Subroutine MRGBN                           *
 C                                                                      *
 C DATE OF LAST CHANGE:  09 August 1994                                 *

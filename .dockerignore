@@ -1,5 +1,20 @@
+# Git files
 .git/
 .gitignore
-data/
-data-*/
-README.adoc
+
+# Docker files
+Dockerfile
+.dockerignore
+
+# Local build artifacts
+obj/
+bin/
+deps.mk
+*.o
+*.mod
+fort.*
+
+# IDE/Editor specific files
+.vscode/
+*.swp
+*~
