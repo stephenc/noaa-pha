@@ -5,6 +5,31 @@ Previously the only the `v52i` [source code](ftp://ftp.ncei.noaa.gov/pub/data/gh
 
 This new source code release does not include any instructions or even any way to compile.
 
+---
+
+## Documentation
+
+**New to this project?** See **[DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)** for a complete guide to all documentation.
+
+**Quick Start Guides:**
+
+1. **[GETTING_STARTED.md](GETTING_STARTED.md)** - Your first PHA analysis in 5 steps
+2. **[WORKFLOW.md](WORKFLOW.md)** - Visual diagrams of the complete pipeline
+3. **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - One-page cheat sheet
+4. **[PROPERTIES_REFERENCE.md](PROPERTIES_REFERENCE.md)** - Complete configuration properties reference
+5. **[V52I_TO_V4_COMPARISON.md](V52I_TO_V4_COMPARISON.md)** - v52i to v4 migration guide and parameter mapping
+6. **[examples/DATA_FORMAT_EXAMPLES.md](examples/DATA_FORMAT_EXAMPLES.md)** - File format examples
+7. **[examples/prepare_sample_data.sh](examples/prepare_sample_data.sh)** - Automated data setup
+
+**Recommended Path:**
+```
+GETTING_STARTED.md → run prepare_sample_data.sh → run PHAMain → consult QUICK_REFERENCE.md as needed
+```
+
+The rest of this README provides detailed technical reference for all programs and file formats.
+
+---
+
 ## Changes from NOAA release on 2025-03-20
 
 The following changes have been made in order to get the source code to compile and the unit tests to pass:
