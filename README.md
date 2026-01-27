@@ -999,7 +999,7 @@ This is the primary format for storing monthly climate data (TMAX, TMIN, TAVG, P
 | Columns | Width | Description                               | Example         |
 |---------|-------|-------------------------------------------|-----------------|
 | 1-11    | 11    | Station ID                                | `USH00018323`   |
-| 12-12   | 1     | Space (sometimes element code in older F77) |                 |
+| 12-12   | 1     | Element code (PHAMain output) or Space (input files) | `3`             |
 | 13-16   | 4     | Year (YYYY)                               | `1950`          |
 | 17-25   | 9     | January Value (I6) + Flags (A3)           | `  1368a  `     |
 | 26-34   | 9     | February Value (I6) + Flags (A3)          | `  1754   `     |
@@ -1015,7 +1015,25 @@ This is the primary format for storing monthly climate data (TMAX, TMIN, TAVG, P
 | 116-124 | 9     | December Value (I6) + Flags (A3)          | `  2283   `     |
 
 *Value: Integer, typically hundredths of degrees C or tenths of mm. -9999 indicates missing.*
-*Flags: DM QC DS (e.g., `E  `, ` X `, ` S `)*
+
+**Flags (3 characters per monthly value):**
+- Position 1: DM (Data Measurement flag) - indicates estimation/measurement method
+- Position 2: QC (Quality Control flag) - indicates quality control actions
+  - ` ` (blank) = acceptable data
+  - `E` = estimated/filled
+  - `X` = removed/flagged by PHA
+  - `Q` = filled due to QC flags in earlier processing stages
+- Position 3: DS (Data Source flag) - indicates data source
+  - Examples: `S` = substitute value, etc.
+
+**Element Codes (Column 12 in PHAMain output files):**
+- 1 = TMAX (maximum temperature)
+- 2 = TMIN (minimum temperature)
+- 3 = TAVG (mean temperature)
+- 4 = PRCP (precipitation, not processed by PHA)
+- 5 = TDTR (diurnal temperature range)
+
+**Note:** Input files (raw data) typically have a space in column 12, but PHAMain writes the single-digit element code in its output files (`.WMs.*` format).
 
 **Input Programs:**
 *   `average_network.awk` (Reads individual station files)

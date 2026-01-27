@@ -288,6 +288,9 @@ USC00084731 1951     98 A     376 A  ...
 USC00084731 1965    134      267    ... (original, post-break)
 ...
 
+Output filename format: {station_id}.WMs.{version}.{element}
+Note: version from pha.version property is truncated to 4 characters
+
 Flags: 'A' = Adjusted by PHA
 ```
 

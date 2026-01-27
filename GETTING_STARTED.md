@@ -44,11 +44,13 @@ These contain the inventory and pre-processed data you can use as input.
 
 ### 3. Set Up Directory Structure
 
+**IMPORTANT:** PHAMain requires all directories to exist before execution.
+
 Create the following directories:
 
 ```bash
 mkdir -p data/ghcnm_v4/raw
-mkdir -p data/history
+mkdir -p data/history            # Required even if not using history files
 mkdir -p output/neighbors
 mkdir -p output/ghcnm_v4_adjusted/{tmax,tmin,tavg}
 ```
@@ -56,7 +58,9 @@ mkdir -p output/ghcnm_v4_adjusted/{tmax,tmin,tavg}
 Place your data:
 - `data/ghcnm.inv` - Station inventory file
 - `data/ghcnm_v4/raw/*.raw.{element}` - Station data files
-- `data/history/*.his` - Station history files (optional)
+- `data/history/` - Directory for station history files (can be empty if `pha.use-history-files = 0`)
+
+**Note:** If using the `helpers/convert_v3_to_v4.py` tool, all required directories are created automatically.
 
 ### 4. Create a Configuration File
 
@@ -110,6 +114,23 @@ The program will:
 6. Write adjusted data to the output directory
 
 Output files will be in `output/ghcnm_v4_adjusted/{element}/`
+
+**Output file naming:** `{station_id}.WMs.{version}.{element}`
+- The `{version}` is from `pha.version` property (truncated to 4 characters)
+- Example: With `pha.version = v1`, output files are named `USC00012345.WMs.v1.tmax`
+
+**Output file format:** Each line contains one year of data with:
+- Station ID (11 chars)
+- Element code (1 digit: 1=TMAX, 2=TMIN, 3=TAVG, 5=TDTR)
+- Year (4 digits)
+- 12 monthly values (each: 6-digit integer + 3 quality flag characters)
+
+**Quality flags in output:** Each monthly value has 3 flag characters:
+- Position 1 (DM): Data Measurement flag
+- Position 2 (QC): Quality Control flag (blank=good, X=removed by PHA, Q=filled, E=estimated)
+- Position 3 (DS): Data Source flag
+
+See [README.md](README.md) for complete format documentation.
 
 ## Understanding the Workflow
 

@@ -189,6 +189,68 @@ class V3ToV4Converter:
             f"Converted {len(files)} files with {self.records_converted} total records"
         )
 
+    def convert_all(
+        self,
+        input_base: Path,
+        output_base: Path,
+        element: str = "tavg",
+        station_list: str = "world1_stnlist.tavg",
+        add_flags: str = "   ",
+    ) -> None:
+        """
+        Convert entire v3 dataset to v4 format.
+
+        Args:
+            input_base: Base directory with v3 structure (contains meta/ and monthly/)
+            output_base: Output base directory for v4 structure
+            element: Element type (tavg, tmax, tmin)
+            station_list: Station list filename in meta/ directory
+            add_flags: Flag characters to add (default: 3 spaces)
+        """
+        self.log(f"Converting full dataset: {input_base} -> {output_base}")
+
+        # Create complete v4 directory structure
+        self.log(f"Creating v4 directory structure...")
+        output_base.mkdir(parents=True, exist_ok=True)
+        (output_base / "data" / "raw").mkdir(parents=True, exist_ok=True)
+        (output_base / "output").mkdir(parents=True, exist_ok=True)
+        (output_base / "output" / "adjusted" / element).mkdir(parents=True, exist_ok=True)
+        (output_base / "history").mkdir(parents=True, exist_ok=True)
+
+        # Convert station list
+        station_list_path = input_base / "meta" / station_list
+        output_inv = output_base / "ghcnm.inv"
+
+        if not station_list_path.exists():
+            self.log(f"Warning: Station list not found: {station_list_path}")
+            self.log(f"Skipping station list conversion")
+        else:
+            self.log(f"Converting station list...")
+            self.convert_station_list(station_list_path, output_inv)
+
+        # Convert data files
+        data_dir = input_base / "monthly" / "raw"
+        output_data_dir = output_base / "data" / "raw"
+        pattern = f"*.raw.{element}"
+
+        if not data_dir.exists():
+            self.log(f"Warning: Data directory not found: {data_dir}")
+            self.log(f"Skipping data conversion")
+        else:
+            self.log(f"Converting data files...")
+            self.convert_directory(data_dir, output_data_dir, pattern, add_flags)
+
+        self.log(
+            f"Full conversion complete: {self.stations_converted} stations, "
+            f"{self.records_converted} records"
+        )
+        self.log(f"Created directory structure:")
+        self.log(f"  {output_base}/ghcnm.inv")
+        self.log(f"  {output_base}/data/raw/")
+        self.log(f"  {output_base}/output/")
+        self.log(f"  {output_base}/output/adjusted/{element}/")
+        self.log(f"  {output_base}/history/")
+
 
 def main():
     """Main entry point."""
@@ -197,110 +259,61 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Convert station list
-  %(prog)s station-list world1_stnlist.tavg world1.inv
-
-  # Convert single data file
-  %(prog)s data-file PW100027370.raw.tavg PW100027370.raw.tavg
-
-  # Convert entire directory
-  %(prog)s directory v52i/monthly/raw/ v4/monthly/raw/ --pattern "*.raw.tavg"
-
-  # Convert Peter's World complete dataset
-  %(prog)s station-list world1/meta/world1_stnlist.tavg world1/ghcnm.inv
-  %(prog)s directory world1/monthly/raw/ world1_v4/data/ghcnm_v4/raw/
+  # Convert entire dataset (default)
+  %(prog)s pw-data-v3 pw-data-v4
+  %(prog)s pw-data-v3/benchmark/world1 pw-data-v4 --element tavg -v
         """,
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-
-    # Station list converter
-    station_parser = subparsers.add_parser(
-        "station-list", help="Convert station list to inventory format"
+    # Positional arguments for full conversion (default mode)
+    parser.add_argument(
+        "input_base", type=Path,
+        help="Input base directory (contains meta/ and monthly/ subdirs)"
     )
-    station_parser.add_argument(
-        "input", type=Path, help="Input v3 station list file"
-    )
-    station_parser.add_argument(
-        "output", type=Path, help="Output v4 inventory file"
+    parser.add_argument(
+        "output_base", type=Path,
+        help="Output base directory for v4 structure"
     )
 
-    # Data file converter
-    data_parser = subparsers.add_parser(
-        "data-file", help="Convert single data file"
+    # Optional arguments
+    parser.add_argument(
+        "--element",
+        default="tavg",
+        help="Element type (tavg, tmax, tmin) (default: tavg)",
     )
-    data_parser.add_argument(
-        "input", type=Path, help="Input v3 data file"
+    parser.add_argument(
+        "--station-list",
+        default="world1_stnlist.tavg",
+        help="Station list filename in meta/ directory (default: world1_stnlist.tavg)",
     )
-    data_parser.add_argument(
-        "output", type=Path, help="Output v4 data file"
-    )
-    data_parser.add_argument(
+    parser.add_argument(
         "--flags",
         default="   ",
-        help="Flag characters to add (default: 3 spaces)",
+        help="Flag characters to add to each value (default: 3 spaces)",
     )
-
-    # Directory converter
-    dir_parser = subparsers.add_parser(
-        "directory", help="Convert directory of data files"
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Verbose output"
     )
-    dir_parser.add_argument(
-        "input_dir", type=Path, help="Input directory with v3 files"
-    )
-    dir_parser.add_argument(
-        "output_dir", type=Path, help="Output directory for v4 files"
-    )
-    dir_parser.add_argument(
-        "--pattern",
-        default="*.raw.*",
-        help="Glob pattern for files (default: *.raw.*)",
-    )
-    dir_parser.add_argument(
-        "--flags",
-        default="   ",
-        help="Flag characters to add (default: 3 spaces)",
-    )
-
-    # Common arguments
-    for p in [station_parser, data_parser, dir_parser]:
-        p.add_argument(
-            "-v", "--verbose", action="store_true", help="Verbose output"
-        )
 
     args = parser.parse_args()
-
-    if not args.command:
-        parser.print_help()
-        return 1
 
     converter = V3ToV4Converter(verbose=args.verbose)
 
     try:
-        if args.command == "station-list":
-            if not args.input.exists():
-                print(f"Error: Input file not found: {args.input}", file=sys.stderr)
-                return 1
-            converter.convert_station_list(args.input, args.output)
-
-        elif args.command == "data-file":
-            if not args.input.exists():
-                print(f"Error: Input file not found: {args.input}", file=sys.stderr)
-                return 1
-            converter.convert_data_file(
-                args.input, args.output, args.flags
+        if not args.input_base.is_dir():
+            print(
+                f"Error: Input directory not found: {args.input_base}",
+                file=sys.stderr,
             )
+            return 1
 
-        elif args.command == "directory":
-            if not args.input_dir.is_dir():
-                print(
-                    f"Error: Input directory not found: {args.input_dir}",
-                    file=sys.stderr,
-                )
-                return 1
-            converter.convert_directory(
-                args.input_dir, args.output_dir, args.pattern, args.flags
-            )
+        converter.convert_all(
+            args.input_base,
+            args.output_base,
+            args.element,
+            args.station_list,
+            args.flags,
+        )
 
         print(
             f"Conversion complete: {converter.stations_converted} stations, "

@@ -19,16 +19,49 @@ This document is generated from source code analysis of the PropertyParameters.f
 
 ---
 
+## Important: Directory Requirements
+
+**PHAMain requires all directories to exist before execution.**
+
+The following directories must be created before running PHAMain:
+
+1. **Output directories:**
+   - `pha.path.station-element-data-out` - For adjusted output files
+   - Parent directory for `pha.path.neighbors.distance`
+   - Parent directory for `pha.path.neighbors.correlation`
+
+2. **History directory:**
+   - `pha.path.station-history` - **Must exist even when `pha.use-history-files = 0`**
+   - Can be an empty directory if not using station history
+
+3. **Log directory:**
+   - Parent directory for `pha.logger.filename`
+
+**Quick setup example:**
+```bash
+mkdir -p data/raw
+mkdir -p output/adjusted/tavg
+mkdir -p history
+```
+
+**For v3 to v4 conversion:** The `convert_v3_to_v4.py` helper tool automatically creates all required directories when using the full conversion mode.
+
+---
+
 ## General Run Parameters
 
 ### pha.version
 **Type:** String
 **Required:** Yes
-**Valid Values:** Any alphanumeric string
+**Valid Values:** Any alphanumeric string (max 4 characters used in output filenames)
 **Default:** None (must be set)
 **Purpose:** Software version identifier used in directory structure and output file names
-**Example:** `v1`, `test`, `20260126`
+**Example:** `v1`, `test`, `pw52`
+**Output filename format:** `{station_id}.WMs.{version}.{element}` (version truncated to 4 chars)
 **Used by:** AdjustSeries (output file naming)
+**Notes:**
+- Can be any length, but only first 4 characters appear in output filenames
+- Example: `pha.version = pw-v4` produces files like `USC00012345.WMs.pw-v.tavg`
 
 ### pha.begin-year
 **Type:** Integer
@@ -142,22 +175,27 @@ All file paths support property value substitution (e.g., `{pha.element}` is rep
 ### pha.path.station-element-data-out
 **Type:** String (directory path)
 **Required:** Yes
-**Valid Values:** Path to writable directory
+**Valid Values:** Path to writable directory (must exist)
 **Default:** None (must be set)
 **Purpose:** Location where adjusted output data files will be written
 **Used by:** AdjustSeries
 **Example:** `output/ghcnm_v4_adjusted/{pha.element}/`
-**Notes:** Output files named `{station_id}.WMs.{version}.{element}`
+**Notes:**
+- **Directory must exist before running PHAMain**
+- Output files named `{station_id}.WMs.{version}.{element}`
 
 ### pha.path.station-history
 **Type:** String (directory path)
-**Required:** Only if `pha.use-history-files` != 0
-**Valid Values:** Path to directory containing .his files
+**Required:** Yes
+**Valid Values:** Path to directory (must exist, even if empty)
 **Default:** None
 **Purpose:** Location of station history metadata files (.his format)
 **Used by:** ReadInputFiles
 **Example:** `data/history/`
-**Notes:** Files should be named `{station_id}.his`. Optional if not using station history.
+**Notes:**
+- Files should be named `{station_id}.his`
+- **Directory must exist even when `pha.use-history-files = 0`**
+- Can be empty directory if not using station history
 
 ---
 
@@ -528,19 +566,21 @@ These properties are used for testing and development. Not needed for normal ope
 
 ### pha.do-run-neighbors
 **Type:** Logical (boolean)
-**Required:** No (testing only)
+**Required:** Yes
 **Valid Values:** `true` or `false`
-**Default:** `true` (if not set)
-**Purpose:** Controls whether to run the neighbor selection code
+**Default:** None (must be specified)
+**Purpose:** Controls whether to run the neighbor selection code. Set to `true` to generate neighbor files automatically, or `false` to use existing neighbor files.
+**Notes:** Despite being marked as testing/development, this property is required in practice.
 **Used by:** PHAMain
 **Notes:** Set to `false` to skip neighbor calculation if using pre-computed neighbors
 
 ### pha.do-run-main
 **Type:** Logical (boolean)
-**Required:** No (testing only)
+**Required:** Yes
 **Valid Values:** `true` or `false`
-**Default:** `true` (if not set)
-**Purpose:** Controls whether to run the main PHA processing
+**Default:** None (must be specified)
+**Purpose:** Controls whether to run the main PHA processing (changepoint detection and adjustment). Set to `true` for normal operation.
+**Notes:** Despite being marked as testing/development, this property is required in practice.
 **Used by:** PHAMain
 **Notes:** Set to `false` to only run neighbor selection
 
@@ -668,6 +708,10 @@ pha.adjust.window = 0
 pha.adjust.filter-method = conf
 pha.adjust.est-method = med
 pha.remove-insignificant = true
+
+# Run Control
+pha.do-run-main = true
+pha.do-run-neighbors = true
 
 # Logging
 pha.logger.filename = pha.log
