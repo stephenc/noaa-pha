@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 # All directories are relative to 
 
@@ -84,14 +84,26 @@ dopt=""
 #  dopt=" --fix --co --trace"
 # dopt=" --fix"
 
+arch=$(uname -m)
+
+case "$arch" in
+  aarch64|arm64)
+    mcmodel=small
+    ;;
+  *)
+    mcmodel=medium
+    ;;
+esac
+
+
 if [ $lf95opt == 1 ]
   then
-  lf95 $dopt $copt --model medium restart.skymod.f95 confirmdisp.skymod.f95 \
+  lf95 $dopt $copt --model "${mcmodel}" restart.skymod.f95 confirmdisp.skymod.f95 \
     ucpmonthly.v25d.for splitmerge.v22b.for chgptmodels.v7a.for \
     SHAPinp.v7c.for read_write.mthly.v6b.for acovf.for \
     skyline.v1.for -o $bin/$binfile 2> lf95.err
 else    
-  gfortran $dopt $copt -fno-sign-zero -mcmodel=medium restart.skymod.f95 confirmdisp.skymod.f95 \
+  gfortran $dopt $copt -fno-sign-zero "-mcmodel=${mcmodel}" restart.skymod.f95 confirmdisp.skymod.f95 \
     ucpmonthly.v25d.for splitmerge.v22b.for chgptmodels.v7a.for \
     SHAPinp.v7c.for read_write.mthly.v6b.for acovf.for \
     skyline.v1.for -o $bin/$binfile 2> lf95.err
