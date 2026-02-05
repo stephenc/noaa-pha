@@ -94,7 +94,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--inventory", help="Path to fixed-width GHCNM inventory file")
     parser.add_argument("--out-dir", required=True, help="Output directory for .his files")
     parser.add_argument("--include-prefixes", default="USC,USW", help="Comma-separated station ID prefixes")
-    parser.add_argument("--contig-bbox", default="24.0,49.5,-125.0,-66.5",
+    parser.add_argument("--contig-bbox", default="22,51,-127,-64",
                         help="Lat/Lon bbox as min_lat,max_lat,min_lon,max_lon")
     parser.add_argument("--begin-year", type=int, help="Optional clamp begin year")
     parser.add_argument("--end-year", type=int, help="Optional clamp end year")
