@@ -218,19 +218,31 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
         "pha.do-run-neighbors = true",
     ]
 
-    def write_prop(path: Path, input_type: str, neighbors_type: str) -> None:
+    def write_prop(path: Path, input_type: str, neighbors_type: str, include_tob: bool) -> None:
         lines = common + [
             "",
             f"pha.input-data-type = {input_type}",
             f"pha.neighbors.input-data-type = {neighbors_type}",
         ]
+        if include_tob:
+            lines.extend([
+                "tob.start-year = 1890",
+                "tob.start-from-history = true",
+                "tob.path.station-element-data-in = " + str(base / "input" / "raw" / "tavg") + "/",
+                "tob.path.station-element-data-out = " + str(base / "input" / "tob" / "tavg") + "/",
+                "tob.logger.filename = " + str(base / "output" / "tob.log"),
+                "tob.logger.level = INFO",
+                "tob.logger.print-to-stdout = false",
+                "tob.logger.append-datestamp = true",
+                "tob.logger.rollover-datestamp = false",
+            ])
         if dry_run:
             return
         with path.open("w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
 
-    write_prop(base / "tavg.properties", "raw", "raw")
-    write_prop(base / "tobs.properties", "tobs", "tobs")
+    write_prop(base / "raw.properties", "raw", "raw", include_tob=False)
+    write_prop(base / "tob.properties", "tob", "tob", include_tob=True)
 
 
 def main() -> int:

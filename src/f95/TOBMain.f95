@@ -27,6 +27,7 @@ program TOBMain
   use PropertyReader
   use ConfigurationUtils
   use PropertyParameters
+  use TOBPropertyParameters
   use FileUtils
   use AlgorithmParameters
   use TOBUtils
@@ -51,6 +52,9 @@ program TOBMain
   character(len=256) :: tob_dir
   character(len=4)   :: element
   character(len=4)   :: data_type
+  integer            :: tob_start_year
+  logical            :: tob_start_from_history
+  integer            :: tob_apply_year
 
   character(len=256) :: input_file
   character(len=256) :: output_file
@@ -86,11 +90,11 @@ program TOBMain
 
   call properties_init(properties_files)
   call detokenize_all_properties()
-  call log_init(get_property_chars(PROP_LOG_FILENAME),     &
-                get_property_chars(PROP_LOG_LEVEL),        &
-                get_property_logical(PROP_LOG_STDOUT),     &
-                get_property_logical(PROP_LOG_DATESTAMP),  &
-                get_property_logical(PROP_LOG_ROLLOVER))
+  call log_init(get_tob_or_pha_chars(PROP_TOB_LOG_FILENAME, PROP_LOG_FILENAME),     &
+                get_tob_or_pha_chars(PROP_TOB_LOG_LEVEL,    PROP_LOG_LEVEL),        &
+                get_tob_or_pha_logical(PROP_TOB_LOG_STDOUT, PROP_LOG_STDOUT),       &
+                get_tob_or_pha_logical(PROP_TOB_LOG_DATESTAMP, PROP_LOG_DATESTAMP), &
+                get_tob_or_pha_logical(PROP_TOB_LOG_ROLLOVER, PROP_LOG_ROLLOVER))
 
   call log_info("BEGIN TOBMain run")
 
@@ -99,20 +103,30 @@ program TOBMain
   ! ---------------------------------------------------------------------------
   element     = get_property_chars(PROP_ELEMENT)
   data_type   = get_property_chars(PROP_INPUT_DATA_TYPE)
-  raw_dir     = get_property_chars(PROP_PATH_ELEMENT_DATA_IN)
+  raw_dir     = get_property_chars(PROP_TOB_PATH_ELEMENT_DATA_IN)
   history_dir = get_property_chars(PROP_PATH_HISTORY)
   meta_file   = get_property_chars(PROP_PATH_STATION_META)
+  tob_start_year = get_property_int(PROP_TOB_START_YEAR)
+  tob_start_from_history = get_property_logical(PROP_TOB_START_FROM_HISTORY)
+
+  if(index(raw_dir, "/raw/") > 0) then
+    data_type = "raw"
+  else if(index(raw_dir, "/tob/") > 0) then
+    data_type = "tob"
+  end if
 
   call log_info("Element:      " // trim(element))
   call log_info("Data type:    " // trim(data_type))
   call log_info("Raw dir:      " // trim(raw_dir))
   call log_info("History dir:  " // trim(history_dir))
   call log_info("Metadata:     " // trim(meta_file))
+  call log_info("TOB start:    " // trim(int_to_str(tob_start_year)))
+  call log_info("TOB start from history: " // trim(log_string(tob_start_from_history)))
 
   ! ---------------------------------------------------------------------------
   ! 3.  Derive tob output directory
   ! ---------------------------------------------------------------------------
-  tob_dir = replace_first(trim(raw_dir), trim(data_type), "tob")
+  tob_dir = get_property_chars(PROP_TOB_PATH_ELEMENT_DATA_OUT)
   call log_info("TOB dir:      " // trim(tob_dir))
 
   if(.not. does_directory_exist(tob_dir)) then
@@ -224,6 +238,7 @@ program TOBMain
     ! 5g. Finalise history: resolve special codes, set sentinel
     ! -----------------------------------------------------------------------
     call resolve_special_codes()
+    tob_apply_year = get_tob_start_year()
 
     byrh(nchgs+1)  = last_year
     bmoh(nchgs+1)  = 12
@@ -264,6 +279,29 @@ program TOBMain
   call log_info("SUCCESS TOBMain completed normally.")
 
 contains
+
+  function get_tob_or_pha_chars(tob_key, pha_key) result(value)
+    character(len=*), intent(in) :: tob_key
+    character(len=*), intent(in) :: pha_key
+    character(len=256) :: value
+    value = get_property_chars(tob_key)
+    if (len_trim(value) == 0) then
+      value = get_property_chars(pha_key)
+    end if
+  end function get_tob_or_pha_chars
+
+  function get_tob_or_pha_logical(tob_key, pha_key) result(value)
+    character(len=*), intent(in) :: tob_key
+    character(len=*), intent(in) :: pha_key
+    logical :: value
+    character(len=256) :: raw
+    raw = get_property_chars(tob_key)
+    if (len_trim(raw) == 0) then
+      value = get_property_logical(pha_key)
+    else
+      value = get_property_logical(tob_key)
+    end if
+  end function get_tob_or_pha_logical
 
   ! ===========================================================================
   !  LOCAL SUBROUTINES / FUNCTIONS
@@ -600,11 +638,34 @@ contains
     do y = first_year, last_year
       do m = 1, 12
         if (values(y, m) == MISSING_INT) cycle
+        if (y < tob_apply_year) cycle
         adj = get_monthly_adj(y, m)
         values(y, m) = values(y, m) - nint(adj * VALUE_SCALE)
       end do
     end do
   end subroutine apply_adjustments
+
+  !> Determine the first year to apply TOB adjustments for this station.
+  !! If tob.start-from-history is true, use the first history record that
+  !! has a resolvable observation time; otherwise use tob.start-year.
+  function get_tob_start_year() result(start_year)
+    integer :: start_year
+    integer :: n
+
+    start_year = tob_start_year
+    if(.not. tob_start_from_history) return
+
+    do n = 1, nchgs
+      if (tobtmp(n) >= 1 .and. tobtmp(n) <= 24) then
+        start_year = byrh(n)
+        return
+      end if
+      if (tobtmp(n) >= 26 .and. tobtmp(n) <= 28) then
+        start_year = byrh(n)
+        return
+      end if
+    end do
+  end function get_tob_start_year
 
   !> Compute the day-weighted monthly adjustment for year y, month m.
   !! Scans the history timeline for any obs-time change that falls within

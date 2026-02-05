@@ -25,6 +25,12 @@ The following changes have been made in order to get the source code to compile 
 * Added `src/test/resources/data/test-station-meta-v3.txt` as a copy of `build/test-station-meta-v3.txt` to get the tests to pass
 * Added a `.gitignore`
 * Added this `README.md` file
+* Added TOB adjustment pipeline (`TOBMain`, `TOBUtils`, `TOBTestUnits`) and supporting TOB property keys (`tob.*`).  
+  The TOB pipeline was reconstructed by combining the documented fragments in the
+  NOAA v4 source with the fully working v52i implementation. Where v4 logic was
+  incomplete, the v52i behavior was used to fill in gaps while preserving the
+  original v4 interfaces and data flow.
+* Added Python helpers in `src/python/` to build inputs, reconstruct histories, and compare outputs
 
 ## Prerequisites
 
@@ -62,6 +68,85 @@ This project uses `make` to manage the build process.
     ```bash
     make help
     ```
+
+## Running the PHA End-to-End
+
+This section shows how to:
+1) Fetch published QCU/QCF inputs plus PHR/MSHR metadata
+2) Generate the `./data` workspace used by the pipeline
+3) Run either the raw (no TOB) pipeline or the TOB+PHA pipeline
+4) Compare outputs with published QCF
+
+### 1) Download the inputs
+
+```bash
+# QCU / QCF
+curl -O https://www.ncei.noaa.gov/pub/data/ghcn/v4/ghcnm.tavg.latest.qcu.tar.gz
+curl -O https://www.ncei.noaa.gov/pub/data/ghcn/v4/ghcnm.tavg.latest.qcf.tar.gz
+
+# PHR / MSHR (station histories)
+curl -O https://www.ncei.noaa.gov/access/homr/file/phr.txt.zip
+curl -O https://www.ncei.noaa.gov/access/homr/file/mshr_enhanced.txt.zip
+```
+
+**Note:** The `latest` QCU/QCF files are rolling and can change daily. NOAA does
+not publish an official archive of daily snapshots, so reproducibility requires
+you to keep your own copies.
+
+### 2) Generate `./data` workspace
+
+```bash
+# Create input layout + properties
+python3 src/python/qcu_to_inputs.py \
+  --qcu-tar ghcnm.tavg.latest.qcu.tar.gz \
+  --base data
+
+# Reconstruct .his station history files
+python3 src/python/phr_to_his.py \
+  --phr-zip phr.txt.zip \
+  --mshr-zip mshr_enhanced.txt.zip \
+  --inventory data/input/station.inv \
+  --out-dir data/input/history
+
+# Optional: build QCF outputs for comparison
+python3 src/python/qcf_to_outputs.py \
+  --qcf-tar ghcnm.tavg.latest.qcf.tar.gz \
+  --base data
+```
+
+### 3) Run the pipeline
+
+Raw (no TOB):
+```bash
+bin/PHAMain -p data/raw.properties
+```
+
+TOB + PHA:
+```bash
+bin/TOBMain -p data/tob.properties
+bin/PHAMain -p data/tob.properties
+```
+
+### 4) Compare outputs
+
+Both the raw and TOB pipelines write to the same output directory, so the same
+comparison commands apply regardless of which path you ran.
+
+Compare output vs QCU input (sanity check):
+```bash
+python3 src/python/compare_dirs.py \
+  data/input/raw/tavg \
+  data/output/adj/tavg \
+  --header
+```
+
+Compare output vs published QCF:
+```bash
+python3 src/python/compare_dirs.py \
+  data/output/adj/tavg \
+  data/output/qcf/tavg \
+  --header
+```
 
 ## Running Tests
 
@@ -155,6 +240,24 @@ This program does not seem to take direct command-line arguments for its core fu
 PHAMain
 ```
 *(Note: Execution likely requires specific input data files and directories to be present as defined in the properties file).*
+
+## TOBMain
+
+This program applies the Time of Observation Bias (TOB) adjustments to monthly data.
+It reads station metadata and `.his` history, computes Karl et al. bias tables, and
+writes adjusted data to the TOB output directory specified by `tob.*` properties.
+
+### Usage
+
+TOBMain is configured via a properties file (e.g., `tob.properties`) and uses
+`tob.path.station-element-data-in`, `tob.path.station-element-data-out`, and
+`tob.start-year` (optionally overridden by `tob.start-from-history`).
+
+### Example
+
+```bash
+bin/TOBMain -p data/tob.properties
+```
 
 ## PHATestOutput
 
