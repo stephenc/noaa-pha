@@ -429,8 +429,8 @@ class ViewerApp:
         total = 0
         done = 0
         compare_flags = [True] if self.right_dir else [False]
-        for include_qc in (False, True):
-            for granularity in ("yearly", "monthly"):
+        for _include_qc in (False, True):
+            for _granularity in ("yearly", "monthly"):
                 for mode in ("overall", "grid"):
                     if mode == "grid" and not self.inv:
                         continue

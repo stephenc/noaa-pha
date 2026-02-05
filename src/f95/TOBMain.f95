@@ -109,10 +109,12 @@ program TOBMain
   tob_start_year = get_property_int(PROP_TOB_START_YEAR)
   tob_start_from_history = get_property_logical(PROP_TOB_START_FROM_HISTORY)
 
-  if(index(raw_dir, "/raw/") > 0) then
-    data_type = "raw"
-  else if(index(raw_dir, "/tob/") > 0) then
-    data_type = "tob"
+  if(len_trim(data_type) == 0) then
+    if(index(raw_dir, "/raw/") > 0) then
+      data_type = "raw"
+    else if(index(raw_dir, "/tob/") > 0) then
+      data_type = "tob"
+    end if
   end if
 
   call log_info("Element:      " // trim(element))
