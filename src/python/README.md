@@ -13,6 +13,8 @@ They are **not** part of the original NOAA source-code tarball. Their purpose is
 - `phr_to_his.py`
   - Reconstructs station history (`.his`) files from the HOMR PHR fixed-width report.
   - Uses station inventory for lat/lon/elev and outputs one `.his` per station.
+  - If MSHR is provided, merges location/elevation/relocation from MSHR and applies a priority order:
+    - PHR (if ever present for location fields) > MSHR > inventory > last-known > 0.0 fallback.
 
 - `qcu_to_inputs.py`
   - Reads a GHCN-M v4 **QCU** `tar.gz` and builds the PHA input directory layout.
@@ -50,6 +52,12 @@ From the PHR section on that page:
 ```
 https://www.ncei.noaa.gov/access/homr/file/phr.txt.zip
 https://www.ncei.noaa.gov/access/homr/file/PHR_Table.txt
+```
+
+Enhanced MSHR downloads and layout:
+```
+https://www.ncei.noaa.gov/access/homr/file/mshr_enhanced.txt.zip
+https://www.ncei.noaa.gov/access/homr/file/MSHR_Enhanced_Table.txt
 ```
 
 ## Notes

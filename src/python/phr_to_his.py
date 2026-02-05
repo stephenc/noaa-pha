@@ -42,6 +42,37 @@ class MshrRecord:
     relocation: str
 
 
+@dataclass(frozen=True)
+class LocationInfo:
+    lat: Optional[float]
+    lon: Optional[float]
+    elev: Optional[float]
+    relocation: str
+
+
+def choose_location_info(
+    phr: Optional[PhrRecord],
+    mshr: Optional[MshrRecord],
+    inv: Optional[InventoryEntry],
+    last: LocationInfo,
+    prefer_mshr: bool,
+) -> LocationInfo:
+    # PHR currently provides no location fields, but keep this priority for future extensions:
+    # PHR > MSHR > Inventory > last-known.
+    if phr is not None:
+        # No location in PHR yet, fall through.
+        pass
+    if mshr is not None and mshr.lat is not None and mshr.lon is not None:
+        return LocationInfo(mshr.lat, mshr.lon, mshr.elev, mshr.relocation)
+    if not prefer_mshr and inv is not None:
+        return LocationInfo(inv.lat, inv.lon, inv.elev, "")
+    if last.lat is not None and last.lon is not None:
+        return last
+    if inv is not None and not prefer_mshr:
+        return LocationInfo(inv.lat, inv.lon, inv.elev, "")
+    return LocationInfo(0.0, 0.0, 0.0, "")
+
+
 PHR_SLICES = {
     "ghcnd_id": (85, 105),
     "begin_date": (106, 114),
@@ -407,6 +438,14 @@ def write_his_files(
             continue
 
         out_path = out_dir / f"{station_id}.his"
+        use_mshr_only = len(mshr_recs) > 0
+        last_location = LocationInfo(None, None, None, "")
+        if use_mshr_only:
+            for rec in mshr_recs:
+                if rec.lat is not None and rec.lon is not None:
+                    last_location = LocationInfo(rec.lat, rec.lon, rec.elev, rec.relocation)
+                    break
+
         with out_path.open("w", encoding="utf-8") as fh:
             for i in range(len(boundaries) - 1):
                 start = boundaries[i]
@@ -420,24 +459,14 @@ def write_his_files(
 
                 obs_time = phr_active.obs_time if phr_active is not None else "    "
 
-                if mshr_active is not None and mshr_active.lat is not None and mshr_active.lon is not None:
-                    lat = mshr_active.lat
-                    lon = mshr_active.lon
-                    elev_val = mshr_active.elev
-                    relocation = mshr_active.relocation
-                else:
-                    if inv is None:
-                        lat = 0.0
-                        lon = 0.0
-                        elev_val = 0.0
-                        relocation = ""
-                    else:
-                        lat = inv.lat
-                        lon = inv.lon
-                        elev_val = inv.elev
-                        relocation = ""
+                location = choose_location_info(phr_active, mshr_active, inv, last_location, prefer_mshr=use_mshr_only)
+                lat = location.lat if location.lat is not None else 0.0
+                lon = location.lon if location.lon is not None else 0.0
+                elev_val = location.elev if location.elev is not None else 0.0
+                relocation = location.relocation
 
                 elev = int(round(elev_val)) if elev_val is not None else (int(round(inv.elev)) if inv else 0)
+                last_location = LocationInfo(lat, lon, elev_val, relocation)
                 line = format_his_line(2, start, end, lat, lon, elev, obs_time, relocation)
                 fh.write(line.rstrip("\n") + "\n")
         stations_written += 1
