@@ -1,0 +1,512 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>PHA Viewer</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .row { margin-bottom: 12px; }
+    canvas { border: 1px solid #ddd; margin-bottom: 10px; }
+    .btn-group { display: inline-flex; margin-left: 8px; }
+    .btn {
+      border: 1px solid #999;
+      background: #eee;
+      color: #333;
+      padding: 6px 10px;
+      cursor: pointer;
+      margin-right: -1px;
+    }
+    .btn:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+    .btn:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; margin-right: 0; }
+    .btn.active { background: #2f6db3; color: #fff; border-color: #2f6db3; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .plot-wrap { position: relative; display: inline-block; }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 4px solid #cfd6df;
+      border-top-color: #2f6db3;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="plot-wrap">
+    <div id="chartLegend" class="row" style="margin-bottom: 6px; font-size: 12px; color: #333;">
+      <span id="legendLeft" style="margin-right: 16px;">
+        <span style="display:inline-block;width:10px;height:10px;background:#1f77b4;margin-right:6px;"></span>
+        <span id="legendLeftText">dir: __LEFT_LABEL__</span>
+      </span>
+      <span id="legendRight">
+        <span style="display:inline-block;width:10px;height:10px;background:#ff7f0e;margin-right:6px;"></span>
+        <span id="legendRightText">ref: __RIGHT_LABEL__</span>
+      </span>
+    </div>
+    <canvas id="chart" width="900" height="300"></canvas>
+    <canvas id="diff" width="900" height="300"></canvas>
+    <div id="chartLoading" class="overlay"><div class="spinner"></div></div>
+  </div>
+
+  <div class="row">
+    <div class="btn-group">
+      <button class="btn active" id="qcIgnore" data-qc="ignore">Ignore QC</button>
+      <button class="btn" id="qcInclude" data-qc="include">Include QC</button>
+    </div>
+  <div class="btn-group">
+    <button class="btn" id="granMonthly" data-granularity="monthly">Monthly</button>
+    <button class="btn active" id="granYearly" data-granularity="yearly">Yearly</button>
+  </div>
+  <div class="btn-group">
+    <button class="btn" id="modeCompare" data-mode="compare">Compare</button>
+    <button class="btn active" id="modeInspect" data-mode="inspect">Inspect</button>
+  </div>
+    <div class="btn-group">
+      <button class="btn active" id="aggNumerical" data-agg="overall">Numerical</button>
+      <button class="btn" id="aggGridded" data-agg="grid">Gridded</button>
+    </div>
+    <div class="btn-group">
+      <button class="btn active" id="scopeAll" data-scope="all">All</button>
+      <button class="btn" id="scopeSelection" data-scope="selection">Selection</button>
+    </div>
+  </div>
+  <div class="row" style="position: relative;">
+    <input id="stationFilter" placeholder="Filter stations..." />
+    <div class="btn-group">
+      <button class="btn active" id="sortId" data-sort="id">ID</button>
+      <button class="btn" id="sortBpAsc" data-sort="bp_asc">BP ↑</button>
+      <button class="btn" id="sortBpDesc" data-sort="bp_desc">BP ↓</button>
+    </div>
+    <select id="stationSelect" size="6" multiple></select>
+    <button id="selectAllBtn" onclick="selectAllStations()" disabled>Select all</button>
+    <span id="stationCount" class="small"></span>
+    <div id="stationLoading" class="overlay"><div class="spinner"></div></div>
+  </div>
+
+  <script>
+    const HAS_REF = __HAS_REF__;
+    let currentView = {mode: 'overall', compare: true, stationIds: []};
+    let pendingStationIds = null;
+    let suppressHistory = false;
+    let lastStationIds = [];
+    const STORAGE_FILTER = 'viewer.filter';
+    const STORAGE_SORT = 'viewer.sort';
+
+    function setButtonActive(id, active) {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      if (active) btn.classList.add('active'); else btn.classList.remove('active');
+    }
+
+    function setActiveInGroup(ids, activeId) {
+      ids.forEach(id => setButtonActive(id, id === activeId));
+    }
+
+    function updateURLFromUI(push, stationIdsOverride) {
+      if (suppressHistory) return;
+      const params = new URLSearchParams();
+      params.set('compare', document.getElementById('modeCompare').classList.contains('active') ? '1' : '0');
+      params.set('agg', document.getElementById('aggGridded').classList.contains('active') ? 'grid' : 'overall');
+      params.set('scope', document.getElementById('scopeSelection').classList.contains('active') ? 'station' : 'all');
+      params.set('include_qc', includeQc());
+      params.set('granularity', granularity());
+      let stationIds = stationIdsOverride;
+      if (!stationIds) {
+        stationIds = Array.from(document.getElementById('stationSelect').selectedOptions).map(o => o.value).filter(Boolean);
+        if (stationIds.length === 0 && currentView.mode === 'station' && lastStationIds.length > 0) {
+          stationIds = lastStationIds.slice();
+        }
+      }
+      if (stationIds && stationIds.length > 0) {
+        lastStationIds = stationIds.slice();
+      }
+      if (stationIds.length > 0) params.set('station_id', stationIds.join(','));
+      const url = `${location.pathname}?${params.toString()}`;
+      if (push) history.pushState(null, '', url); else history.replaceState(null, '', url);
+    }
+
+    function applyStateFromURL() {
+      const params = new URLSearchParams(window.location.search);
+      const compare = params.get('compare') === '1';
+      const agg = params.get('agg') === 'grid' ? 'grid' : 'overall';
+      let scope = params.get('scope') === 'station' ? 'station' : 'all';
+      const includeQC = params.get('include_qc') === '1';
+      const gran = params.get('granularity') === 'monthly' ? 'monthly' : 'yearly';
+      const stationParam = params.get('station_id') || '';
+      if (stationParam) {
+        scope = 'station';
+      }
+      const storedFilter = sessionStorage.getItem(STORAGE_FILTER) || '';
+      const storedSort = sessionStorage.getItem(STORAGE_SORT) || 'id';
+      setActiveInGroup(['modeCompare', 'modeInspect'], compare ? 'modeCompare' : 'modeInspect');
+      setActiveInGroup(['aggNumerical', 'aggGridded'], agg === 'grid' ? 'aggGridded' : 'aggNumerical');
+      setActiveInGroup(['scopeAll', 'scopeSelection'], scope === 'station' ? 'scopeSelection' : 'scopeAll');
+      setActiveInGroup(['qcIgnore', 'qcInclude'], includeQC ? 'qcInclude' : 'qcIgnore');
+      setActiveInGroup(['granMonthly', 'granYearly'], gran === 'monthly' ? 'granMonthly' : 'granYearly');
+      setActiveInGroup(['sortId', 'sortBpAsc', 'sortBpDesc'], storedSort === 'bp_asc' ? 'sortBpAsc' : (storedSort === 'bp_desc' ? 'sortBpDesc' : 'sortId'));
+      if (stationParam) {
+        pendingStationIds = stationParam.split(',').filter(Boolean);
+        lastStationIds = pendingStationIds.slice();
+      }
+      if (storedFilter) {
+        document.getElementById('stationFilter').value = storedFilter;
+      }
+      const mode = scope === 'station' ? 'station' : agg;
+      const ids = pendingStationIds || [];
+      currentView = {mode, compare, stationIds: ids};
+    }
+    function setActiveButtons() {
+      setActiveInGroup(['modeCompare', 'modeInspect'], currentView.compare ? 'modeCompare' : 'modeInspect');
+      setActiveInGroup(['aggNumerical', 'aggGridded'], currentView.mode === 'grid' ? 'aggGridded' : 'aggNumerical');
+      setActiveInGroup(['scopeAll', 'scopeSelection'], currentView.mode === 'station' ? 'scopeSelection' : 'scopeAll');
+    }
+    function includeQc() {
+      return document.getElementById('qcInclude').classList.contains('active') ? '1' : '0';
+    }
+    function granularity() {
+      return document.getElementById('granYearly').classList.contains('active') ? 'yearly' : 'monthly';
+    }
+    function drawSeries(canvasId, seriesList, yLabel) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!seriesList || seriesList.length === 0) return;
+      const allPoints = seriesList.flatMap(s => s.points);
+      if (allPoints.length === 0) return;
+      function parseYearFraction(t) {
+        if (!t) return null;
+        const parts = t.split('-');
+        const year = parseInt(parts[0], 10);
+        if (isNaN(year)) return null;
+        if (parts.length > 1) {
+          const month = parseInt(parts[1], 10);
+          if (!isNaN(month)) {
+            return year + (month - 1) / 12.0;
+          }
+        }
+        return year;
+      }
+      const ys = allPoints.map(p => p.v);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const pad = { left: 58, right: 20, top: 25, bottom: 40 };
+      const w = canvas.width - pad.left - pad.right;
+      const h = canvas.height - pad.top - pad.bottom;
+      function yToPx(y) {
+        if (maxY === minY) return pad.top + h / 2;
+        return pad.top + (maxY - y) / (maxY - minY) * h;
+      }
+      // Axes
+      ctx.strokeStyle = '#999';
+      ctx.beginPath();
+      ctx.moveTo(pad.left, pad.top);
+      ctx.lineTo(pad.left, pad.top + h);
+      ctx.lineTo(pad.left + w, pad.top + h);
+      ctx.stroke();
+
+      // Y label
+      ctx.fillStyle = '#333';
+      ctx.font = '12px sans-serif';
+      ctx.save();
+      ctx.translate(18, pad.top + h / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText(yLabel, 0, 0);
+      ctx.restore();
+
+      // Y ticks
+      const yTicks = 5;
+      ctx.fillStyle = '#555';
+      for (let i = 0; i <= yTicks; i++) {
+        const y = pad.top + (i / yTicks) * h;
+        ctx.beginPath();
+        ctx.moveTo(pad.left - 4, y);
+        ctx.lineTo(pad.left, y);
+        ctx.stroke();
+        const val = maxY - (i / yTicks) * (maxY - minY);
+        const label = val.toFixed(1);
+        const labelWidth = ctx.measureText(label).width;
+        ctx.fillText(label, pad.left - 8 - labelWidth, y + 4);
+      }
+
+      // X labels (30-year ticks)
+      const yearVals = allPoints.map(p => parseYearFraction(p.t)).filter(y => y !== null);
+      const years = yearVals.map(y => Math.floor(y));
+      if (years.length > 0) {
+        const axisMin = Math.min(...yearVals);
+        const axisMax = Math.max(...yearVals);
+        const minYear = Math.floor(axisMin);
+        const maxYear = Math.ceil(axisMax);
+        const denom = (axisMax - axisMin) || 1;
+        const anchor = 1700;
+        const offset = Math.ceil((axisMin - anchor) / 30) * 30;
+        const startTick = anchor + offset;
+        for (let y = startTick; y <= maxYear; y += 30) {
+          const x = pad.left + ((y - axisMin) / denom) * w;
+          ctx.beginPath();
+          ctx.moveTo(x, pad.top + h);
+          ctx.lineTo(x, pad.top + h + 4);
+          ctx.stroke();
+          ctx.fillText(String(y), x - 12, pad.top + h + 16);
+        }
+      }
+      seriesList.forEach((series, idx) => {
+        ctx.strokeStyle = idx === 0 ? '#1f77b4' : '#ff7f0e';
+        ctx.beginPath();
+        series.points.forEach((p, i) => {
+          const yr = parseYearFraction(p.t);
+          const axisMin = Math.min(...yearVals);
+          const axisMax = Math.max(...yearVals);
+          const denom = (axisMax - axisMin) || 1;
+          const t = yr === null ? i / (series.points.length - 1 || 1) : (yr - axisMin) / denom;
+          const x = pad.left + t * w;
+          const y = yToPx(p.v);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      });
+    }
+    function adjustPlotLayout(compare) {
+      const chart = document.getElementById('chart');
+      const diff = document.getElementById('diff');
+      const legend = document.getElementById('chartLegend');
+      if (compare) {
+        chart.height = 300;
+        diff.style.display = 'block';
+        diff.height = 300;
+        legend.style.display = 'block';
+      } else {
+        chart.height = 600;
+        diff.style.display = 'none';
+        legend.style.display = 'none';
+      }
+    }
+
+    const seriesCache = new Map();
+    let chartRequestId = 0;
+    let chartAbortController = null;
+    async function fetchSeries(mode, compare) {
+      const reqId = ++chartRequestId;
+      const stationIds = currentView.stationIds || [];
+      const stationParam = mode === 'station' ? stationIds.join(',') : '';
+      const key = `${mode}|${compare ? 1 : 0}|${includeQc()}|${granularity()}|${stationParam}`;
+      if (seriesCache.has(key)) return seriesCache.get(key);
+      if (chartAbortController) {
+        chartAbortController.abort();
+      }
+      chartAbortController = new AbortController();
+      const loading = document.getElementById('chartLoading');
+      loading.style.display = 'flex';
+      try {
+        const res = await fetch(`/api/series?mode=${mode}&compare=${compare ? '1' : '0'}&include_qc=${includeQc()}&granularity=${granularity()}&station_id=${stationParam}`, { signal: chartAbortController.signal });
+        const data = await res.json();
+        if (reqId === chartRequestId) {
+          loading.style.display = 'none';
+          seriesCache.set(key, data);
+        }
+        return data;
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          return null;
+        }
+        loading.style.display = 'none';
+        throw err;
+      }
+    }
+    async function loadSeries(mode, compare) {
+      const useCompare = compare || (HAS_REF && !compare);
+      const data = await fetchSeries(mode, useCompare);
+      if (!data) return;
+      adjustPlotLayout(compare);
+      let series = data.series || [];
+      if (!compare && HAS_REF) {
+        const leftOnly = series.filter(s => s.label === 'left');
+        series = leftOnly.length > 0 ? leftOnly : (series.length ? [series[0]] : []);
+      }
+      drawSeries('chart', series, 'T (°C)');
+      if (compare) {
+        drawSeries('diff', data.diff ? [{label:'diff', points:data.diff}] : [], 'ΔT (°C)');
+      }
+      if (HAS_REF) {
+        fetchSeries(mode, true).catch(() => {});
+      }
+    }
+    function selectView(mode, compare) {
+      const stationIds = Array.from(document.getElementById('stationSelect').selectedOptions).map(o => o.value);
+      return selectViewWithIds(mode, compare, stationIds);
+    }
+    function selectViewWithIds(mode, compare, stationIds) {
+      const ids = stationIds || [];
+      currentView = {mode, compare, stationIds: ids};
+      setActiveButtons();
+      loadSeries(mode, compare);
+      updateURLFromUI(true, ids);
+    }
+    let stationCache = null;
+    let stationRequestId = 0;
+    async function fetchStations() {
+      const reqId = ++stationRequestId;
+      const loading = document.getElementById('stationLoading');
+      loading.style.display = 'flex';
+      const res = await fetch(`/api/stations?include_qc=${includeQc()}`);
+      const data = await res.json();
+      if (reqId === stationRequestId) {
+        loading.style.display = 'none';
+      }
+      stationCache = data;
+      return data;
+    }
+    function applyStations(data) {
+      const filterText = (document.getElementById('stationFilter').value || '').toLowerCase();
+      let sortMode = 'id';
+      if (document.getElementById('sortBpAsc').classList.contains('active')) sortMode = 'bp_asc';
+      if (document.getElementById('sortBpDesc').classList.contains('active')) sortMode = 'bp_desc';
+      let rows = data.filter(s => {
+        if (!filterText) return true;
+        const name = (s.name || '').toLowerCase();
+        return s.id.toLowerCase().includes(filterText) || name.includes(filterText);
+      });
+      if (sortMode === 'bp_asc') {
+        rows.sort((a, b) => (a.breakpoints ?? 1e9) - (b.breakpoints ?? 1e9));
+      } else if (sortMode === 'bp_desc') {
+        rows.sort((a, b) => (b.breakpoints ?? -1) - (a.breakpoints ?? -1));
+      } else {
+        rows.sort((a, b) => a.id.localeCompare(b.id));
+      }
+      const sel = document.getElementById('stationSelect');
+      sel.innerHTML = '';
+      rows.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        const name = s.name ? ` - ${s.name}` : '';
+        opt.textContent = `${s.id}${name} (bp=${s.breakpoints ?? 'n/a'})`;
+        sel.appendChild(opt);
+      });
+      if (pendingStationIds && pendingStationIds.length > 0) {
+        const idSet = new Set(pendingStationIds);
+        for (const opt of sel.options) {
+          if (idSet.has(opt.value)) opt.selected = true;
+        }
+        pendingStationIds = null;
+        const selected = Array.from(sel.selectedOptions).map(o => o.value).filter(Boolean);
+        if (selected.length > 0) {
+          updateURLFromUI(false, selected);
+        }
+      }
+      const hasStations = rows.length > 0;
+      document.getElementById('selectAllBtn').disabled = !hasStations;
+      const selCount = sel.selectedOptions.length;
+      document.getElementById('stationCount').textContent = `selected ${selCount} / ${rows.length}`;
+    }
+    async function loadStations() {
+      const data = stationCache || await fetchStations();
+      applyStations(data);
+    }
+    function selectAllStations() {
+      const sel = document.getElementById('stationSelect');
+      for (const opt of sel.options) {
+        opt.selected = true;
+      }
+      updateStationCount();
+      refreshFromControls();
+    }
+    function updateStationCount() {
+      const sel = document.getElementById('stationSelect');
+      const total = sel.options.length;
+      const selected = sel.selectedOptions.length;
+      document.getElementById('stationCount').textContent = `selected ${selected} / ${total}`;
+    }
+    function refreshFromControls() {
+      const compare = document.getElementById('modeCompare').classList.contains('active');
+      const agg = document.getElementById('aggGridded').classList.contains('active') ? 'grid' : 'overall';
+      const scope = document.getElementById('scopeSelection').classList.contains('active') ? 'station' : agg;
+      if (scope === 'station') {
+        const selected = Array.from(document.getElementById('stationSelect').selectedOptions).map(o => o.value);
+        if (selected.length === 0 && pendingStationIds && pendingStationIds.length > 0) {
+          selectViewWithIds(scope, compare, pendingStationIds);
+          return;
+        }
+      }
+      selectView(scope, compare);
+    }
+    document.getElementById('qcIgnore').addEventListener('click', () => {
+      document.getElementById('qcIgnore').classList.add('active');
+      document.getElementById('qcInclude').classList.remove('active');
+      loadStations();
+      refreshFromControls();
+    });
+    document.getElementById('qcInclude').addEventListener('click', () => {
+      document.getElementById('qcInclude').classList.add('active');
+      document.getElementById('qcIgnore').classList.remove('active');
+      loadStations();
+      refreshFromControls();
+    });
+    document.getElementById('granMonthly').addEventListener('click', () => {
+      document.getElementById('granMonthly').classList.add('active');
+      document.getElementById('granYearly').classList.remove('active');
+      refreshFromControls();
+    });
+    document.getElementById('granYearly').addEventListener('click', () => {
+      document.getElementById('granYearly').classList.add('active');
+      document.getElementById('granMonthly').classList.remove('active');
+      refreshFromControls();
+    });
+    document.getElementById('modeCompare').addEventListener('click', () => { document.getElementById('modeCompare').classList.add('active'); document.getElementById('modeInspect').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('modeInspect').addEventListener('click', () => { document.getElementById('modeInspect').classList.add('active'); document.getElementById('modeCompare').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('aggNumerical').addEventListener('click', () => { document.getElementById('aggNumerical').classList.add('active'); document.getElementById('aggGridded').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('aggGridded').addEventListener('click', () => { document.getElementById('aggGridded').classList.add('active'); document.getElementById('aggNumerical').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('scopeAll').addEventListener('click', () => { document.getElementById('scopeAll').classList.add('active'); document.getElementById('scopeSelection').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('scopeSelection').addEventListener('click', () => { document.getElementById('scopeSelection').classList.add('active'); document.getElementById('scopeAll').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('stationFilter').addEventListener('input', () => {
+      sessionStorage.setItem(STORAGE_FILTER, document.getElementById('stationFilter').value || '');
+      if (stationCache) applyStations(stationCache);
+      else loadStations();
+    });
+    const sortButtons = ['sortId', 'sortBpAsc', 'sortBpDesc'];
+    sortButtons.forEach(id => {
+      document.getElementById(id).addEventListener('click', () => {
+        sortButtons.forEach(other => document.getElementById(other).classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+        const sortMode = id === 'sortBpAsc' ? 'bp_asc' : (id === 'sortBpDesc' ? 'bp_desc' : 'id');
+        sessionStorage.setItem(STORAGE_SORT, sortMode);
+        if (stationCache) applyStations(stationCache);
+        else loadStations();
+      });
+    });
+    document.getElementById('stationSelect').addEventListener('change', () => {
+      updateStationCount();
+      document.getElementById('scopeSelection').classList.add('active');
+      document.getElementById('scopeAll').classList.remove('active');
+      refreshFromControls();
+    });
+
+    window.addEventListener('load', () => {
+      applyStateFromURL();
+      loadStations();
+      setActiveButtons();
+      refreshFromControls();
+      if (pendingStationIds && pendingStationIds.length > 0) {
+        updateURLFromUI(false, pendingStationIds);
+      }
+    });
+
+    window.addEventListener('popstate', () => {
+      suppressHistory = true;
+      applyStateFromURL();
+      loadStations();
+      setActiveButtons();
+      refreshFromControls();
+      suppressHistory = false;
+    });
+  </script>
+</body>
+</html>
