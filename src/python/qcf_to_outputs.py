@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 import tarfile
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 DAT_ID_SLICE = (0, 11)
 DAT_YEAR_SLICE = (11, 15)
@@ -66,6 +66,7 @@ def write_station_data(
 ) -> Tuple[int, int]:
     line_count = 0
     station_files: Dict[str, Path] = {}
+    seen: Set[str] = set()
 
     with tar.extractfile(dat_member) as fh:
         if fh is None:
@@ -109,7 +110,9 @@ def write_station_data(
             out_path = out_dir / f"{station_id}.qcf.tavg"
             if station_id not in station_files:
                 station_files[station_id] = out_path
-            with out_path.open("a", encoding="utf-8") as out:
+            mode = "w" if station_id not in seen else "a"
+            seen.add(station_id)
+            with out_path.open(mode, encoding="utf-8") as out:
                 out.write(out_line + "\n")
 
     return line_count, len(station_files)

@@ -68,8 +68,6 @@ def choose_location_info(
         return LocationInfo(inv.lat, inv.lon, inv.elev, "")
     if last.lat is not None and last.lon is not None:
         return last
-    if inv is not None and not prefer_mshr:
-        return LocationInfo(inv.lat, inv.lon, inv.elev, "")
     return LocationInfo(0.0, 0.0, 0.0, "")
 
 
