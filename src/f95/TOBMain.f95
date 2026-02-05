@@ -1,10 +1,12 @@
 !> @brief
-!! TOB structure and plumbing pass.  Boots via the same properties
-!! mechanism as PHAMain, iterates every station in the metadata file,
-!! copies each raw data file verbatim into a tob/ output directory,
-!! and parses .his files to log the observation-time history.
-!! Stations without a .his file are noted as defaulting to TOB=2400.
-!! No data values are changed in this pass.
+!! TOB structure, plumbing, and adjustment pass.  Boots via the same properties
+!! mechanism as PHAMain, iterates every station in the metadata file, reads raw
+!! data and .his observation-time history, computes Karl-et-al bias estimates
+!! via TOBUtils, applies day-weighted monthly adjustments, and writes the
+!! corrected series into a tob/ output directory.
+!! Stations without a .his file default to TOB=2400 (no adjustment; verbatim
+!! copy).  Stations outside the contiguous US (ITZ not in {1-4}) or with fewer
+!! than 5 years of data are also copied verbatim.
 !!
 !! USAGE: TOBMain -p properties-filename(s)
 !!    ex: TOBMain -p ghcnm-pha.properties
@@ -26,11 +28,20 @@ program TOBMain
   use ConfigurationUtils
   use PropertyParameters
   use FileUtils
+  use AlgorithmParameters
+  use TOBUtils
 
   implicit none
 
   ! ---------------------------------------------------------------------------
-  ! Program-level variables
+  ! Constants
+  ! ---------------------------------------------------------------------------
+  integer, parameter :: MAX_CHANGES = 200
+
+  ! ---------------------------------------------------------------------------
+  ! Program-level variables (accessed by contained procedures via host
+  ! association — do NOT duplicate these names as dummy arguments in any
+  ! contained subroutine/function).
   ! ---------------------------------------------------------------------------
   character(len=1024), dimension(:), allocatable :: properties_files
 
@@ -46,13 +57,27 @@ program TOBMain
   character(len=256) :: his_file
 
   character(len=11)  :: station_id
-  character(len=130) :: meta_line
+  real               :: lat, lon
 
-  integer :: meta_unit, meta_lines
-  integer :: in_unit, out_unit
+  integer :: meta_unit
   integer :: read_status
-  integer :: n_stations, n_with_history, n_without_history
-  integer :: idx
+  integer :: n_stations, n_with_history, n_without_history, n_adjusted
+
+  ! Per-station history timeline
+  integer :: nchgs
+  integer :: byrh(MAX_CHANGES+1), bmoh(MAX_CHANGES+1), bdayh(MAX_CHANGES+1)
+  integer :: tobtmp(0:MAX_CHANGES)
+
+  ! Per-station raw data (allocated each station)
+  integer, allocatable :: values(:, :)
+  character(len=3), allocatable :: flags(:, :)
+  integer :: first_year, last_year
+  character(len=1) :: elem_char
+
+  ! Computation temporaries
+  real :: ltix(0:13)
+  real :: a_table(12, 24)
+  integer :: itz, mict
 
   ! ---------------------------------------------------------------------------
   ! 1.  Bootstrap: properties, logger
@@ -72,11 +97,11 @@ program TOBMain
   ! ---------------------------------------------------------------------------
   ! 2.  Read configuration from properties
   ! ---------------------------------------------------------------------------
-  element   = get_property_chars(PROP_ELEMENT)
-  data_type = get_property_chars(PROP_INPUT_DATA_TYPE)
-  raw_dir   = get_property_chars(PROP_PATH_ELEMENT_DATA_IN)
+  element     = get_property_chars(PROP_ELEMENT)
+  data_type   = get_property_chars(PROP_INPUT_DATA_TYPE)
+  raw_dir     = get_property_chars(PROP_PATH_ELEMENT_DATA_IN)
   history_dir = get_property_chars(PROP_PATH_HISTORY)
-  meta_file = get_property_chars(PROP_PATH_STATION_META)
+  meta_file   = get_property_chars(PROP_PATH_STATION_META)
 
   call log_info("Element:      " // trim(element))
   call log_info("Data type:    " // trim(data_type))
@@ -85,12 +110,11 @@ program TOBMain
   call log_info("Metadata:     " // trim(meta_file))
 
   ! ---------------------------------------------------------------------------
-  ! 3.  Derive tob output directory by replacing data_type with "tob"
+  ! 3.  Derive tob output directory
   ! ---------------------------------------------------------------------------
   tob_dir = replace_first(trim(raw_dir), trim(data_type), "tob")
   call log_info("TOB dir:      " // trim(tob_dir))
 
-  ! Create tob_dir if it does not yet exist
   if(.not. does_directory_exist(tob_dir)) then
     call execute_command_line("mkdir -p " // trim(tob_dir))
     call log_info("Created output directory: " // trim(tob_dir))
@@ -111,6 +135,7 @@ program TOBMain
   n_stations         = 0
   n_with_history     = 0
   n_without_history  = 0
+  n_adjusted         = 0
 
   meta_unit  = get_available_file_unit()
   open(unit=meta_unit, file=trim(meta_file), status='old', iostat=read_status)
@@ -121,11 +146,9 @@ program TOBMain
   end if
 
   do
-    ! Read next line from metadata file (station_id is columns 1:11)
-    read(meta_unit, '(a11)', iostat=read_status) station_id
-    if(read_status /= 0) exit   ! EOF or error
-
-    ! Skip blank station IDs
+    ! Read station_id, lat, lon from .inv  (a11,f9.4,f10.4)
+    read(meta_unit, '(a11,f9.4,f10.4)', iostat=read_status) station_id, lat, lon
+    if(read_status /= 0) exit
     if(len_trim(station_id) == 0) cycle
 
     n_stations = n_stations + 1
@@ -147,21 +170,84 @@ program TOBMain
     end if
 
     ! -----------------------------------------------------------------------
-    ! 5c. Parse .his file and log obs-time history  OR  note default TOB=2400
+    ! 5c. Read observation-time history
     ! -----------------------------------------------------------------------
-    if(does_file_exist(his_file)) then
-      call read_and_log_history(his_file, station_id)
-      n_with_history = n_with_history + 1
-    else
-      call log_info("TOBMain: " // trim(station_id) // " — no .his file; defaults to TOB=2400")
+    call read_history()
+
+    if (nchgs == 0) then
+      ! No usable history -> copy verbatim (default TOB=2400)
+      call copy_file(input_file, output_file)
+      call log_info("TOBMain: " // trim(station_id) // " — no history; copied verbatim (TOB=2400)")
       n_without_history = n_without_history + 1
+      cycle
+    end if
+
+    n_with_history = n_with_history + 1
+
+    ! -----------------------------------------------------------------------
+    ! 5d. Read raw data into memory
+    ! -----------------------------------------------------------------------
+    call read_raw_data()
+
+    if (first_year > last_year) then
+      call log_warn("TOBMain: " // trim(station_id) // " — empty data file; skipped")
+      cycle
     end if
 
     ! -----------------------------------------------------------------------
-    ! 5d. Copy raw data file verbatim to tob output
+    ! 5e. Compute long-term monthly means and check minimum-years threshold
     ! -----------------------------------------------------------------------
-    call copy_file(input_file, output_file)
-    call log_info("TOBMain: copied " // trim(station_id))
+    call compute_monthly_means()
+
+    if (mict < 5) then
+      call log_warn("TOBMain: " // trim(station_id) // " — only " // &
+                    trim(int_to_str(mict)) // " years; copied verbatim")
+      call copy_file(input_file, output_file)
+      if (allocated(values)) deallocate(values)
+      if (allocated(flags))  deallocate(flags)
+      cycle
+    end if
+
+    ! -----------------------------------------------------------------------
+    ! 5f. Time-zone check (contiguous US only)
+    ! -----------------------------------------------------------------------
+    itz = get_timezone(lon)
+    if (itz < 1 .or. itz > 4) then
+      call log_warn("TOBMain: " // trim(station_id) // " — outside contiguous US; copied verbatim")
+      call copy_file(input_file, output_file)
+      if (allocated(values)) deallocate(values)
+      if (allocated(flags))  deallocate(flags)
+      cycle
+    end if
+
+    ! -----------------------------------------------------------------------
+    ! 5g. Finalise history: resolve special codes, set sentinel
+    ! -----------------------------------------------------------------------
+    call resolve_special_codes()
+
+    byrh(nchgs+1)  = last_year
+    bmoh(nchgs+1)  = 12
+    bdayh(nchgs+1) = 32   ! one past end – matches v3 convention
+
+    ! -----------------------------------------------------------------------
+    ! 5h. Compute 12x24 bias table via Karl et al. algorithm
+    ! -----------------------------------------------------------------------
+    call compute_bias_tables(lat, lon, itz, ltix, a_table, element)
+
+    ! -----------------------------------------------------------------------
+    ! 5i. Apply day-weighted adjustments to each year-month
+    ! -----------------------------------------------------------------------
+    call apply_adjustments()
+
+    ! -----------------------------------------------------------------------
+    ! 5j. Write adjusted data
+    ! -----------------------------------------------------------------------
+    call write_data()
+    n_adjusted = n_adjusted + 1
+    call log_info("TOBMain: adjusted " // trim(station_id))
+
+    if (allocated(values)) deallocate(values)
+    if (allocated(flags))  deallocate(flags)
 
   end do   ! station loop
 
@@ -174,6 +260,7 @@ program TOBMain
   call log_info("  Stations processed:   " // trim(int_to_str(n_stations)))
   call log_info("  With .his history:    " // trim(int_to_str(n_with_history)))
   call log_info("  Without .his (2400):  " // trim(int_to_str(n_without_history)))
+  call log_info("  Adjusted:             " // trim(int_to_str(n_adjusted)))
   call log_info("SUCCESS TOBMain completed normally.")
 
 contains
@@ -211,7 +298,7 @@ contains
 
   ! ---------------------------------------------------------------------------
   !  replace_first – return result of replacing the first occurrence of
-  !  'old' with 'new' inside 'src'.  Pure string operation.
+  !  'old' with 'new' inside 'src'.
   ! ---------------------------------------------------------------------------
   function replace_first(src, old, new) result(res)
     character(len=*), intent(in) :: src, old, new
@@ -220,7 +307,6 @@ contains
 
     pos = index(src, old)
     if(pos == 0) then
-      ! old not found – return src unchanged
       res = src
     else
       res = src(1:pos-1) // new // src(pos+len(old):)
@@ -228,7 +314,7 @@ contains
   end function replace_first
 
   ! ---------------------------------------------------------------------------
-  !  int_to_str – convert integer to trimmed string (no external dependency)
+  !  int_to_str – convert integer to trimmed string
   ! ---------------------------------------------------------------------------
   function int_to_str(val) result(res)
     integer, intent(in) :: val
@@ -269,83 +355,355 @@ contains
     close(u_out)
   end subroutine copy_file
 
-  ! ---------------------------------------------------------------------------
-  !  read_and_log_history – open a .his file, iterate its records, and log the
-  !  observation-time field from each record.
-  !
-  !  Record format matches ReadInputFiles.f95:572 —
-  !    format(i1,12x,2(1x,i4,2i2),1x,f3.0,2f3.0,1x,f4.0,2f3.0,1x,a11,1x,i5,2x,a4,1x,a4,5x,11(a5,1x))
-  !  We only extract the fields needed for TOB logging:
-  !    source       – i1          (record source: 0=SHF, 1=daily, 2=MSHR, 3=CDMP)
-  !    beg_year     – i4          (begin year)
-  !    beg_month    – i2          (begin month)
-  !    beg_day      – i2          (begin day)
-  !    end_year     – i4          (end year)
-  !    end_month    – i2          (end month)
-  !    end_day      – i2          (end day)
-  !    obs_time     – a4          (the second a4 field: observation time code)
-  ! ---------------------------------------------------------------------------
-  subroutine read_and_log_history(his_path, station_id)
-    character(len=*), intent(in) :: his_path
-    character(len=11), intent(in) :: station_id
+  ! ===========================================================================
+  !  HISTORY I/O
+  ! ===========================================================================
 
-    integer  :: u_his, ios, rec_count
-    integer  :: source
+  !> Read the .his file named by host variable his_file and build the
+  !! observation-time change timeline into host arrays nchgs/byrh/bmoh/bdayh/tobtmp.
+  !! Uses FORMAT 90 (ReadInputFiles.f95:572).  Source==1 (TD3200 daily) records
+  !! are skipped.  Consecutive records with the same decoded obs-time code are
+  !! collapsed.
+  subroutine read_history()
+
+    integer  :: u_his, ios, source
     integer  :: beg_year, beg_month, beg_day
     integer  :: end_year, end_month, end_day
-    ! Placeholders for fields we must consume but do not log
-    real     :: lat_deg, lat_min, lat_sec, lon_deg, lon_min, lon_sec
+    real     :: lat_deg, lat_min, lat_sec
+    real     :: lon_deg, lon_min, lon_sec
     character(len=11) :: dist_dir
     integer  :: elev
-    character(len=4)  :: instr_height_full
-    character(len=4)  :: obs_time
+    character(len=4)  :: instr_height_full, obs_time
     character(len=5)  :: instr(11)
-    character(len=80) :: msg
+    integer  :: obcode, prev_code
 
-    ! The same FORMAT used by ReadInputFiles::read_standard_history (line 572)
-90  format(i1,12x,2(1x,i4,2i2),1x,f3.0,2f3.0,1x,f4.0,2f3.0, &
-           1x,a11,1x,i5,2x,a4,1x,a4,5x,11(a5,1x))
+    ! FORMAT 90 – matches ReadInputFiles.f95:572
+  90 format(i1,12x,2(1x,i4,2i2),1x,f3.0,2f3.0,1x,f4.0,2f3.0, &
+            1x,a11,1x,i5,2x,a4,1x,a4,5x,11(a5,1x))
+
+    nchgs      = 0
+    prev_code  = -1
+    tobtmp(0)  = 28        ! pre-history default = sunset (matches v3 NRMTOB)
+
+    if (.not. does_file_exist(his_file)) return
 
     u_his = get_available_file_unit()
-    open(unit=u_his, file=trim(his_path), status='old', action='read', iostat=ios)
-    if(ios /= 0) then
-      call log_warn("TOBMain: cannot open history file: " // trim(his_path))
-      return
-    end if
+    open(unit=u_his, file=trim(his_file), status='old', action='read', iostat=ios)
+    if (ios /= 0) return
 
     call log_info("TOBMain: " // trim(station_id) // " — reading .his")
-    rec_count = 0
 
     do
-      read(u_his, 90, iostat=ios) source, beg_year, beg_month, beg_day,  &
-                                  end_year, end_month, end_day,           &
-                                  lat_deg, lat_min, lat_sec,             &
-                                  lon_deg, lon_min, lon_sec,             &
-                                  dist_dir, elev, instr_height_full,     &
-                                  obs_time, instr
-      if(ios /= 0) exit
+      read(u_his, 90, iostat=ios) source,                          &
+                                  beg_year, beg_month, beg_day,    &
+                                  end_year, end_month, end_day,    &
+                                  lat_deg,  lat_min,   lat_sec,    &
+                                  lon_deg,  lon_min,   lon_sec,    &
+                                  dist_dir, elev,                  &
+                                  instr_height_full, obs_time,     &
+                                  instr
+      if (ios /= 0) exit
 
-      ! Skip source==1 (daily obs-time records) to match PHA convention
-      if(source == 1) cycle
+      ! Skip daily (TD3200) records
+      if (source == 1) cycle
 
-      rec_count = rec_count + 1
-      write(msg, '(a,i1,a,i4.4,a,i2.2,a,i2.2,a,i4.4,a,i2.2,a,i2.2,a,a4)') &
-            "  src=", source,                   &
-            " beg=", beg_year, "-", beg_month, "-", beg_day, &
-            " end=", end_year, "-", end_month, "-", end_day, &
-            " obs_time=", obs_time
-      call log_info("TOBMain: " // trim(station_id) // trim(msg))
+      ! Decode obs_time A4 -> integer code
+      obcode = decode_obtime(obs_time)
+
+      ! Only record if different from previous
+      if (obcode /= prev_code) then
+        if (nchgs >= MAX_CHANGES) then
+          call log_warn("TOBMain: " // trim(station_id) // &
+                        " — exceeded MAX_CHANGES; remaining history ignored")
+          exit
+        end if
+        nchgs = nchgs + 1
+        byrh(nchgs)   = beg_year
+        bmoh(nchgs)   = beg_month
+        bdayh(nchgs)  = beg_day
+        tobtmp(nchgs) = obcode
+        prev_code     = obcode
+      end if
     end do
 
     close(u_his)
 
-    if(rec_count == 0) then
-      call log_info("TOBMain: " // trim(station_id) // " — .his file empty or unparseable; defaults to TOB=2400")
+    if (nchgs > 0) then
+      call log_info("TOBMain: " // trim(station_id) // " — " // &
+                    trim(int_to_str(nchgs)) // " history change(s)")
+    end if
+  end subroutine read_history
+
+  ! ===========================================================================
+  !  RAW DATA I/O
+  ! ===========================================================================
+
+  !> Read the raw data file named by host variable input_file into host
+  !! allocatable arrays values/flags.  Two-pass: first to find the year range,
+  !! second to fill arrays.  Sets host variables first_year, last_year, elem_char.
+  subroutine read_raw_data()
+
+    character(len=11) :: sid
+    character(len=1)  :: ec
+    integer :: year, m, u_in, ios
+    integer :: tv(12)
+    character(len=3) :: tf(12)
+
+    first_year = 99999
+    last_year  = -99999
+    elem_char  = ' '
+
+    ! --- pass 1: year range ---
+    u_in = get_available_file_unit()
+    open(unit=u_in, file=trim(input_file), status='old', action='read', iostat=ios)
+    if (ios /= 0) then
+      call log_warn("TOBMain: cannot open data file: " // trim(input_file))
+      first_year = 0;  last_year = -1
+      return
     end if
 
-  end subroutine read_and_log_history
+    do
+      read(u_in, '(a11,a1,i4,12(i6,a3))', iostat=ios) sid, ec, year, &
+           (tv(m), tf(m), m=1,12)
+      if (ios /= 0) exit
+      if (first_year == 99999) elem_char = ec
+      if (year < first_year) first_year = year
+      if (year > last_year)  last_year  = year
+    end do
+    close(u_in)
+
+    if (first_year > last_year) return   ! no data
+
+    ! --- allocate ---
+    allocate(values(first_year:last_year, 12))
+    allocate(flags(first_year:last_year, 12))
+    values = MISSING_INT
+    flags  = '   '
+
+    ! --- pass 2: fill ---
+    u_in = get_available_file_unit()
+    open(unit=u_in, file=trim(input_file), status='old', action='read', iostat=ios)
+    do
+      read(u_in, '(a11,a1,i4,12(i6,a3))', iostat=ios) sid, ec, year, &
+           (tv(m), tf(m), m=1,12)
+      if (ios /= 0) exit
+      values(year, :) = tv
+      flags(year, :)  = tf
+    end do
+    close(u_in)
+  end subroutine read_raw_data
+
+  ! ---------------------------------------------------------------------------
+  !  write_data – write adjusted data in GHCNMv4 format
+  ! ---------------------------------------------------------------------------
+  subroutine write_data()
+
+    integer :: u_out, ios, y, m
+    character(len=124) :: line
+
+    u_out = get_available_file_unit()
+    open(unit=u_out, file=trim(output_file), status='replace', action='write', iostat=ios)
+    if (ios /= 0) then
+      call log_warn("TOBMain: cannot write output: " // trim(output_file))
+      return
+    end if
+
+    do y = first_year, last_year
+      ! Build the 124-character line into a buffer first, then write it.
+      ! Avoids a mixed integer/character implied-do in a single write statement
+      ! which gfortran does not handle correctly for assumed-shape arrays.
+      write(line, '(a11,a1,i4)') station_id, elem_char, y
+      do m = 1, 12
+        write(line(17+(m-1)*9:25+(m-1)*9), '(i6,a3)') values(y, m), flags(y, m)
+      end do
+      write(u_out, '(a)') line
+    end do
+
+    close(u_out)
+  end subroutine write_data
+
+  ! ===========================================================================
+  !  MONTHLY-MEAN & CODE-RESOLUTION HELPERS
+  ! ===========================================================================
+
+  !> Compute long-term monthly means from host arrays values/first_year/last_year.
+  !! Sets host ltix(0:13) where indices 1-12 are monthly means in degrees C,
+  !! 0 = December (for drift wrap) and 13 = January.
+  !! Also sets host mict = max count of non-missing years across all months.
+  subroutine compute_monthly_means()
+
+    integer :: y, m, ict(12)
+    real    :: sum_val(12)
+
+    ict = 0
+    sum_val = 0.
+    mict = 0
+
+    do m = 1, 12
+      do y = first_year, last_year
+        if (values(y, m) /= MISSING_INT) then
+          ict(m) = ict(m) + 1
+          sum_val(m) = sum_val(m) + real(values(y, m)) / VALUE_SCALE
+        end if
+      end do
+      if (ict(m) > mict) mict = ict(m)
+    end do
+
+    do m = 1, 12
+      if (ict(m) > 0) then
+        ltix(m) = sum_val(m) / real(ict(m))
+      else
+        ltix(m) = 0.0
+      end if
+    end do
+
+    ! Wrap for drift calculation
+    ltix(0)  = ltix(12)
+    ltix(13) = ltix(1)
+  end subroutine compute_monthly_means
+
+  !> Resolve special observation-time codes in place in host array tobtmp.
+  !! 25 (HR) -> 24 (midnight).
+  !! 29, 99 (unknown) -> previous code.
+  !! 30 (TRID / traditional) -> previous code.
+  !! Codes 26-28 (RS/SR/SS) are left intact; they are resolved per-month
+  !! by tobchg at adjustment time.
+  subroutine resolve_special_codes()
+    integer :: n
+
+    ! tobtmp(0) is already set to 28 (sunset) in read_history
+
+    do n = 1, nchgs
+      select case (tobtmp(n))
+        case (30)   ! TRID – traditional, same as previous
+          tobtmp(n) = tobtmp(n-1)
+        case (25)   ! HR – treat as midnight
+          tobtmp(n) = 24
+        case (99, 29)   ! unknown / other
+          tobtmp(n) = tobtmp(n-1)
+      end select
+    end do
+  end subroutine resolve_special_codes
+
+  ! ===========================================================================
+  !  ADJUSTMENT APPLICATION
+  ! ===========================================================================
+
+  !> Walk every year-month in the data, compute the day-weighted TOB
+  !! adjustment, and subtract it from non-missing values.
+  !! Operates on host arrays values, first_year, last_year, nchgs, byrh,
+  !! bmoh, bdayh, tobtmp, a_table.
+  subroutine apply_adjustments()
+    integer :: y, m
+    real    :: adj
+
+    do y = first_year, last_year
+      do m = 1, 12
+        if (values(y, m) == MISSING_INT) cycle
+        adj = get_monthly_adj(y, m)
+        values(y, m) = values(y, m) - nint(adj * VALUE_SCALE)
+      end do
+    end do
+  end subroutine apply_adjustments
+
+  !> Compute the day-weighted monthly adjustment for year y, month m.
+  !! Scans the history timeline for any obs-time change that falls within
+  !! the month and produces a weighted average of the per-hour biases.
+  function get_monthly_adj(y, m) result(adj)
+    integer, intent(in) :: y, m
+    real :: adj
+
+    integer :: active_idx, n, tob
+    integer :: seg_start, seg_end, days_tot
+    real    :: weighted_sum
+
+    days_tot = days_in_month(y, m)
+
+    ! Find the change active at the start of this month
+    active_idx = find_active_change(y, m, 1)
+
+    weighted_sum = 0.
+    seg_start    = 1
+
+    ! Scan forward for changes that fall within this month
+    do n = active_idx + 1, nchgs
+      ! Past this month?
+      if (byrh(n) > y .or. (byrh(n) == y .and. bmoh(n) > m)) exit
+      ! Change is inside this month – close the preceding segment
+      seg_end = bdayh(n) - 1
+      if (seg_end >= seg_start) then
+        tob = tobtmp(active_idx)
+        if (tob >= 26 .and. tob <= 28) call tobchg(m, tob)
+        if (tob >= 1 .and. tob <= 24) then
+          weighted_sum = weighted_sum + real(seg_end - seg_start + 1) * a_table(m, tob)
+        end if
+      end if
+      seg_start  = bdayh(n)
+      active_idx = n
+    end do
+
+    ! Final (or only) segment: seg_start .. end of month
+    seg_end = days_tot
+    if (seg_end >= seg_start) then
+      tob = tobtmp(active_idx)
+      if (tob >= 26 .and. tob <= 28) call tobchg(m, tob)
+      if (tob >= 1 .and. tob <= 24) then
+        weighted_sum = weighted_sum + real(seg_end - seg_start + 1) * a_table(m, tob)
+      end if
+    end if
+
+    adj = weighted_sum / real(days_tot)
+  end function get_monthly_adj
+
+  !> Find the index of the latest history change whose begin-date is
+  !! at or before (y, m, d).  Returns 0 if the date precedes all changes
+  !! (pre-history; tobtmp(0) = sunset is used).
+  function find_active_change(y, m, d) result(idx)
+    integer, intent(in) :: y, m, d
+    integer :: idx, n
+
+    idx = 0
+    do n = 1, nchgs
+      if (date_le(byrh(n), bmoh(n), bdayh(n), y, m, d)) then
+        idx = n
+      else
+        exit   ! changes are chronological
+      end if
+    end do
+  end function find_active_change
+
+  ! ---------------------------------------------------------------------------
+  !  date_le – is date (y1/m1/d1) <= date (y2/m2/d2)?
+  ! ---------------------------------------------------------------------------
+  function date_le(y1, m1, d1, y2, m2, d2) result(le)
+    integer, intent(in) :: y1, m1, d1, y2, m2, d2
+    logical :: le
+    le = (y1 < y2) .or. &
+         (y1 == y2 .and. m1 < m2) .or. &
+         (y1 == y2 .and. m1 == m2 .and. d1 <= d2)
+  end function date_le
+
+  ! ---------------------------------------------------------------------------
+  !  days_in_month – with leap-year February
+  ! ---------------------------------------------------------------------------
+  function days_in_month(y, m) result(d)
+    integer, intent(in) :: y, m
+    integer :: d
+    integer, parameter :: NDAYS(12) = (/31,28,31,30,31,30,31,31,30,31,30,31/)
+    d = NDAYS(m)
+    if (m == 2 .and. is_leap_year(y)) d = 29
+  end function days_in_month
+
+  ! ---------------------------------------------------------------------------
+  !  is_leap_year
+  ! ---------------------------------------------------------------------------
+  function is_leap_year(y) result(leap)
+    integer, intent(in) :: y
+    logical :: leap
+    leap = (mod(y,4) == 0 .and. mod(y,100) /= 0) .or. mod(y,400) == 0
+  end function is_leap_year
 
 end program TOBMain
 
 !> @file
-!! TOB structure and plumbing pass for GHCN-Monthly.
+!! TOB structure, plumbing and adjustment pass for GHCN-Monthly.

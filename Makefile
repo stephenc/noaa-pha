@@ -54,8 +54,8 @@ all: deps.mk $(PROGRAMS:%=$(ABS_BIN_DIR)/%) $(AWK_TARGETS) ## Build all programs
 test: unit-test output-test ## Run all tests
 
 .PHONY: unit-test
-unit-test: $(ABS_BIN_DIR)/PHATestUnits ## Run unit tests
-	"$<" -d 20160316 -longflag test
+unit-test: $(ABS_BIN_DIR)/PHATestUnits $(ABS_BIN_DIR)/TOBTestUnits ## Run unit tests
+	$(foreach bin,$^,"$(bin)" -d 20160316 -longflag test &&) true
 
 .PHONY: output-test
 output-test: $(ABS_BIN_DIR)/PHATestOutput ## Run output tests
