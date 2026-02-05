@@ -414,7 +414,7 @@ class ViewerApp:
     def _precompute_series(self) -> None:
         total = 0
         done = 0
-        compare_flags = [False, True] if self.right_dir else [False]
+        compare_flags = [True] if self.right_dir else [False]
         for include_qc in (False, True):
             for granularity in ("yearly", "monthly"):
                 for mode in ("overall", "grid"):
@@ -602,7 +602,7 @@ class ViewerApp:
         return {"error": "unknown mode"}
 
 
-HTML = """<!doctype html>
+HTML_TEMPLATE = """<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
@@ -688,7 +688,8 @@ HTML = """<!doctype html>
   </div>
 
   <script>
-    let currentView = {mode: 'overall', compare: false, stationIds: []};
+    const HAS_REF = __HAS_REF__;
+    let currentView = {mode: 'overall', compare: true, stationIds: []};
     function setActiveButtons() {
       const toggleGroup = (ids, activeId) => {
         ids.forEach(id => document.getElementById(id).classList.remove('active'));
@@ -835,13 +836,21 @@ HTML = """<!doctype html>
       return data;
     }
     async function loadSeries(mode, compare) {
-      const data = await fetchSeries(mode, compare);
+      const useCompare = compare || (HAS_REF && !compare);
+      const data = await fetchSeries(mode, useCompare);
       adjustPlotLayout(compare);
-      drawSeries('chart', data.series || [], 'T (°C)');
+      let series = data.series || [];
+      if (!compare && HAS_REF) {
+        const leftOnly = series.filter(s => s.label === 'left');
+        series = leftOnly.length > 0 ? leftOnly : (series.length ? [series[0]] : []);
+      }
+      drawSeries('chart', series, 'T (°C)');
       if (compare) {
         drawSeries('diff', data.diff ? [{label:'diff', points:data.diff}] : [], 'ΔT (°C)');
       }
-      fetchSeries(mode, !compare).catch(() => {});
+      if (HAS_REF) {
+        fetchSeries(mode, true).catch(() => {});
+      }
     }
     function selectView(mode, compare) {
       const stationIds = Array.from(document.getElementById('stationSelect').selectedOptions).map(o => o.value);
@@ -1011,7 +1020,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/":
-            body = HTML.encode("utf-8")
+            has_ref = "true" if self.app.right_dir is not None else "false"
+            body = HTML_TEMPLATE.replace("__HAS_REF__", has_ref).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(body)))
