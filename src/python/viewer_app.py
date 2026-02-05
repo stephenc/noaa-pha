@@ -11,7 +11,8 @@ import json
 import math
 import hashlib
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -120,11 +121,16 @@ def should_include(qc: str, include_qc: bool) -> bool:
         return True
     return qc == " "
 
+def maybe_yield(counter: int, every: int = 50) -> None:
+    if every and counter % every == 0:
+        time.sleep(0)
+
 
 def compute_overall_mean(left_map: Dict[str, Path], include_qc: bool) -> Tuple[float, int]:
     total = 0.0
     count = 0
-    for path in left_map.values():
+    for idx, path in enumerate(left_map.values(), start=1):
+        maybe_yield(idx)
         data = parse_station_file(path)
         for values, qcflags in data.values():
             for v, qc in zip(values, qcflags):
@@ -144,7 +150,8 @@ def compute_overall_diff(
 ) -> Tuple[float, int]:
     total = 0.0
     count = 0
-    for station_id, left_path in left_map.items():
+    for idx, (station_id, left_path) in enumerate(left_map.items(), start=1):
+        maybe_yield(idx)
         right_path = right_map.get(station_id)
         if right_path is None:
             continue
@@ -169,7 +176,8 @@ def compute_grid_mean(
     include_qc: bool,
 ) -> Dict[int, Tuple[float, int]]:
     grid: Dict[int, Tuple[float, int]] = {}
-    for station_id, path in left_map.items():
+    for idx, (station_id, path) in enumerate(left_map.items(), start=1):
+        maybe_yield(idx)
         if station_id not in inv:
             continue
         lat, lon, _ = inv[station_id]
@@ -193,7 +201,8 @@ def compute_grid_diff(
     include_qc: bool,
 ) -> Dict[int, Tuple[float, int]]:
     grid: Dict[int, Tuple[float, int]] = {}
-    for station_id, left_path in left_map.items():
+    for idx, (station_id, left_path) in enumerate(left_map.items(), start=1):
+        maybe_yield(idx)
         right_path = right_map.get(station_id)
         if right_path is None:
             continue
@@ -238,7 +247,8 @@ def compute_overall_series(
     granularity: str,
 ) -> List[dict]:
     sums: Dict[str, Tuple[float, int]] = {}
-    for path in left_map.values():
+    for idx, path in enumerate(left_map.values(), start=1):
+        maybe_yield(idx)
         data = parse_station_file(path)
         for year, (values, qcflags) in data.items():
             for idx, (v, qc) in enumerate(zip(values, qcflags), start=1):
@@ -261,7 +271,8 @@ def compute_overall_series_compare(
     left_sums: Dict[str, Tuple[float, int]] = {}
     right_sums: Dict[str, Tuple[float, int]] = {}
     diff_sums: Dict[str, Tuple[float, int]] = {}
-    for station_id, left_path in left_map.items():
+    for idx, (station_id, left_path) in enumerate(left_map.items(), start=1):
+        maybe_yield(idx)
         right_path = right_map.get(station_id)
         if right_path is None:
             continue
@@ -292,7 +303,8 @@ def compute_grid_series(
     granularity: str,
 ) -> List[dict]:
     buckets: Dict[str, Dict[int, Tuple[float, int]]] = {}
-    for station_id, path in left_map.items():
+    for idx, (station_id, path) in enumerate(left_map.items(), start=1):
+        maybe_yield(idx)
         if station_id not in inv:
             continue
         lat, lon, _ = inv[station_id]
@@ -327,7 +339,8 @@ def compute_grid_series_compare(
     buckets_left: Dict[str, Dict[int, Tuple[float, int]]] = {}
     buckets_right: Dict[str, Dict[int, Tuple[float, int]]] = {}
     buckets_diff: Dict[str, Dict[int, Tuple[float, int]]] = {}
-    for station_id, left_path in left_map.items():
+    for idx, (station_id, left_path) in enumerate(left_map.items(), start=1):
+        maybe_yield(idx)
         right_path = right_map.get(station_id)
         if right_path is None or station_id not in inv:
             continue
@@ -373,7 +386,8 @@ def count_breakpoints(
     right_data = parse_station_file(right_path)
     prev_diff: Optional[int] = None
     count = 0
-    for year in sorted(set(left_data.keys()) & set(right_data.keys())):
+    for idx, year in enumerate(sorted(set(left_data.keys()) & set(right_data.keys())), start=1):
+        maybe_yield(idx)
         lvals, lqc = left_data[year]
         rvals, rqc = right_data[year]
         for lv, rv, lq, rq in zip(lvals, rvals, lqc, rqc):
@@ -819,25 +833,39 @@ HTML_TEMPLATE = """<!doctype html>
 
     const seriesCache = new Map();
     let chartRequestId = 0;
+    let chartAbortController = null;
     async function fetchSeries(mode, compare) {
       const reqId = ++chartRequestId;
       const stationIds = currentView.stationIds || [];
       const stationParam = mode === 'station' ? stationIds.join(',') : '';
       const key = `${mode}|${compare ? 1 : 0}|${includeQc()}|${granularity()}|${stationParam}`;
       if (seriesCache.has(key)) return seriesCache.get(key);
+      if (chartAbortController) {
+        chartAbortController.abort();
+      }
+      chartAbortController = new AbortController();
       const loading = document.getElementById('chartLoading');
       loading.style.display = 'flex';
-      const res = await fetch(`/api/series?mode=${mode}&compare=${compare ? '1' : '0'}&include_qc=${includeQc()}&granularity=${granularity()}&station_id=${stationParam}`);
-      const data = await res.json();
-      if (reqId === chartRequestId) {
+      try {
+        const res = await fetch(`/api/series?mode=${mode}&compare=${compare ? '1' : '0'}&include_qc=${includeQc()}&granularity=${granularity()}&station_id=${stationParam}`, { signal: chartAbortController.signal });
+        const data = await res.json();
+        if (reqId === chartRequestId) {
+          loading.style.display = 'none';
+          seriesCache.set(key, data);
+        }
+        return data;
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          return null;
+        }
         loading.style.display = 'none';
+        throw err;
       }
-      seriesCache.set(key, data);
-      return data;
     }
     async function loadSeries(mode, compare) {
       const useCompare = compare || (HAS_REF && !compare);
       const data = await fetchSeries(mode, useCompare);
+      if (!data) return;
       adjustPlotLayout(compare);
       let series = data.series || [];
       if (!compare && HAS_REF) {
@@ -1096,7 +1124,7 @@ def main() -> int:
     app = ViewerApp(left, right, inv)
     Handler.app = app
 
-    server = HTTPServer((args.host, args.port), Handler)
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Viewer running at http://{args.host}:{args.port}")
     server.serve_forever()
     return 0
