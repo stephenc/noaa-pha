@@ -130,8 +130,9 @@ program TOBMain
   call log_info("TOB dir:      " // trim(tob_dir))
 
   if(.not. does_directory_exist(tob_dir)) then
-    call execute_command_line("mkdir -p " // trim(tob_dir))
-    call log_info("Created output directory: " // trim(tob_dir))
+    call log_fatal("TOBMain: output directory missing: " // trim(tob_dir))
+    call log_info("TOBMain: create it before running.")
+    stop
   end if
 
   ! ---------------------------------------------------------------------------
