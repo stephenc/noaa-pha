@@ -227,7 +227,7 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
         ]
         if include_tob:
             lines.extend([
-                "tob.start-year = 1890",
+                "tob.start-year = 1895",
                 "tob.start-from-history = true",
                 "tob.path.station-element-data-in = " + str(base / "input" / "raw" / "tavg") + "/",
                 "tob.path.station-element-data-out = " + str(base / "input" / "tob" / "tavg") + "/",
