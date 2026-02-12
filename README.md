@@ -74,6 +74,109 @@ This project uses `make` to manage the build process.
     make help
     ```
 
+## Running the PHA End-to-End
+
+This section shows how to:
+1) Fetch published QCU/QCF inputs plus PHR/MSHR metadata
+2) Generate the `./data` workspace used by the pipeline
+3) Run either the raw (no TOB) pipeline or the TOB+PHA pipeline
+4) Compare outputs with published QCF
+
+### 1) Download the inputs
+
+```bash
+mkdir -p ./data
+# QCU / QCF
+curl -o ./data/ghcnm.tavg.latest.qcu.tar.gz https://www.ncei.noaa.gov/pub/data/ghcn/v4/ghcnm.tavg.latest.qcu.tar.gz
+curl -o ./data/ghcnm.tavg.latest.qcf.tar.gz https://www.ncei.noaa.gov/pub/data/ghcn/v4/ghcnm.tavg.latest.qcf.tar.gz
+
+# PHR / MSHR (station histories)
+curl -o ./data/phr.txt.zip https://www.ncei.noaa.gov/access/homr/file/phr.txt.zip
+curl -o ./data/mshr_enhanced.txt.zip https://www.ncei.noaa.gov/access/homr/file/mshr_enhanced.txt.zip
+```
+
+**Note:** The `latest` QCU/QCF files are rolling and can change daily. NOAA does
+not publish an official archive of daily snapshots, so reproducibility requires
+you to keep your own copies.
+
+### 2) Populate `./data` workspace
+
+```bash
+# Create input layout + properties
+python3 src/python/qcu_to_inputs.py \
+  --qcu-tar ./data/ghcnm.tavg.latest.qcu.tar.gz \
+  --base data
+
+# Extract build QCF outputs for comparison
+python3 src/python/qcf_to_outputs.py \
+  --qcf-tar ./data/ghcnm.tavg.latest.qcf.tar.gz \
+  --base data
+```
+
+There are two strategies for recovering the history files.
+
+1. Reverse-engineer from the QCF-QCU delta (*recommended*)
+    ```bash 
+    python3 src/python/qcufdelta_to_his.py \
+      --inv data/input/station.inv \
+      --qcu-dir data/input/raw/tavg \
+      --qcf-dir data/output/qcf/tavg \
+      --mshr-zip mshr_enhanced.txt.zip \
+      --out-history-dir data/input/history
+   ```
+2. Construct from the PHR records
+    ```bash
+    python3 src/python/phr_to_his.py \
+      --inventory data/input/station.inv \
+      --phr-zip phr.txt.zip \
+      --mshr-zip mshr_enhanced.txt.zip \
+      --out-dir data/input/history    
+    ```
+
+### 3) Run the pipeline
+
+Raw (no TOB):
+```bash
+bin/PHAMain -p data/raw.properties
+```
+
+TOB + PHA:
+```bash
+bin/TOBMain -p data/tob.properties
+bin/PHAMain -p data/tob.properties
+```
+
+### 4) Compare outputs
+
+Both the raw and TOB pipelines write to the same output directory, so the same
+comparison commands apply regardless of which path you ran.
+
+Compare output vs QCU input (sanity check):
+```bash
+python3 src/python/compare_dirs.py \
+  data/input/raw/tavg \
+  data/output/adj/tavg \
+  --header
+```
+
+Compare output vs published QCF:
+```bash
+python3 src/python/compare_dirs.py \
+  data/output/adj/tavg \
+  data/output/qcf/tavg \
+  --header
+```
+
+Visualise changes
+
+```bash
+bin/PHAview \
+  --inventory data/input/station.inv \
+  --dir data/output/adj/tavg \
+  --ref data/input/raw/tavg \
+  --ref2 data/output/qcf/tavg 
+```
+
 ## Running Tests
 
 The project includes tests managed by the Makefile. Ensure any necessary input data is available (typically expected in a `data/` directory as configured in the `.properties` files).
