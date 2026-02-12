@@ -1,0 +1,4 @@
+bin/
+data/realworld/
+data-*/
+data/benchmark/case7/output/case7_bench.*.log
