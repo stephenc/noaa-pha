@@ -722,9 +722,9 @@ c        print *,' Opened: ',mmunit,' File: ', mattmeta
 
 c     ---------------------------------------------------------------------
 c     Open Candidate stations meta file to process
-      open(nnunit, name=netfile, err=200)
+      open(nnunit, file=netfile, err=200)
       if(mattdata .ne. '') then
-        open(rnunit, name=mattdata, err = 210)  
+        open(rnunit, file=mattdata, err = 210)  
       endif  
       
       print *,'  Decisions on inhomogeneity of the Candidate are made'
@@ -1909,11 +1909,13 @@ c         changed begin loop from itarg+1 to itarg, 14 Aug 03
             if(ipair .eq. 0) goto 20
 c           convert chgpt model byte to integer and remove SLR codes
             mtype = iachar(nfound(itarg,it2pair,imo)) - 2
-            if(mtype .gt. 0) then
+            if(mtype .gt. 0 .and. mtype .le. ntyp) then
               if(icdebug .ge. 3)
      *          print *,'mtype: ',itarg,it2pair,imo,it,mtype
               itfound = itfound + 1
               itypshow(imo,itarg,mtype) = itypshow(imo,itarg,mtype)+1
+            else if(mtype .gt. ntyp) then
+              nfound(itarg,it2pair,imo) = czero
             endif  
           enddo  
 c         filter found by the number of separate pairs hit
@@ -2080,7 +2082,7 @@ c           ... go thru the pairs
             if(ipair .eq. 0) goto 45
 c           erase the hits for the event with the pair
             mtype = iachar(nfound(itarg,it2pair,ihighmo)) - 2
-            if(mtype .gt. 0) then
+            if(mtype .gt. 0 .and. mtype .le. ntyp) then
 c              nfound(itarg,it2pair,ihighmo) = czero
 c             fetch the chgpt number of the event
               nchg = iachar(nspan(itarg,it2pair,ihighmo))
@@ -2107,6 +2109,8 @@ c             go forward ... clearing out peripherals
                 ifndshow(imo,itarg) = ifndshow(imo,itarg)-1
                 ntest(itarg,imo) = ntest(itarg,imo) - 1
               enddo
+            else if(mtype .gt. ntyp) then
+              nfound(itarg,it2pair,ihighmo) = czero
             endif  
    44     enddo ! end of paired station loop for target
 
@@ -2123,7 +2127,7 @@ c             if one of the paired station neighbors is the chosen target
               if(js .eq. itarg) then
 c               zero out the chgpt for that pair!
                 mtype = iachar(nfound(ipair,ip2targ,ihighmo)) - 2
-                if(mtype .gt. 0) then
+                if(mtype .gt. 0 .and. mtype .le. ntyp) then
 c                 fetch the chgpt number of the event
                   nchg = iachar(nspan(ipair,ip2targ,ihighmo))
                   if(nchg .eq. 0) then
@@ -2155,6 +2159,8 @@ c                 go forward (including ihighmo)... clearing out peripherals
      *              print *,'Zeroed STN: ',ntstn(itarg),' neigh:', 
      *              ntstn(ipair),' neigh index:',ip2targ,' range:',imo1,
      *              imo2,' fndshow:',ifndshow(imo,ipair)
+                else if(mtype .gt. ntyp) then
+                  nfound(ipair,ip2targ,ihighmo) = czero
                 endif
                 goto 50
               endif  

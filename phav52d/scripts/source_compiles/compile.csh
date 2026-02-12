@@ -34,6 +34,9 @@ set time_def = MLY
 set SCRIPTS = $USHCNBASE/phav52d/scripts/source_compiles
 set SRC = $USHCNBASE/phav52d/source_expand
 set BIN = $USHCNBASE/bin
+if ( ! -d $BIN ) then
+  mkdir -p $BIN
+endif
 
 set cwd = `pwd`
 cd $SRC
@@ -45,7 +48,18 @@ set binfile = $BIN/${version}.${comptype}.${time_def}.${net_def}
 
 echo "Begin $binfile Compilation"
 $SCRIPTS/$version.csh $binfile $comptype
+set compile_status = $status
 echo "End $binfile Compilation"
+
+if ( $compile_status != 0 ) then
+  echo "Compilation failed with status: $compile_status"
+  exit $compile_status
+endif
+
+if ( ! -x $binfile ) then
+  echo "Compilation did not produce executable: $binfile"
+  exit 1
+endif
 
 echo "Leaving :" $0
 cd $cwd

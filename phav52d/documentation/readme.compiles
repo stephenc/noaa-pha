@@ -1,5 +1,13 @@
 cwd=`pwd`
 
+if command -v g77 >/dev/null 2>&1; then
+  FC=g77
+else
+  echo "g77 compiler not found."
+  echo "This legacy helper build requires g77-compatible extensions."
+  exit 1
+fi
+
 # Go to the directory with the source code
 src=$USHCNBASE/phav52d/lib_src
 bin=$USHCNBASE/bin
@@ -7,15 +15,15 @@ cd $src
 
 # Compile the routine to generate the distance neighbor list from 
 #  the station list
-g77 ushcn_dist_2004.v3.f -o $bin/ushcn_dist_2004.v3
+$FC ushcn_dist_2004.v3.f -o $bin/ushcn_dist_2004.v3
 
 # Compile the routine to generate the first difference correlation
 #  neighbor list from the station and distance neighbor lists.
 # This routine accounts for the coincident periods of each station pair
 #  to ensure the best overlap during each station's period-of-record
-g77 ushcn_corr_2004.v3.f -o $bin/ushcn_corr_2004.v3
+$FC ushcn_corr_2004.v3.f -o $bin/ushcn_corr_2004.v3
 
 # Compile the routine to estimate (fill-in) missing data
-g77 ushcn_fill_2004.v4p.f filnet_subs_2004.4p.f -o $bin/ushcn_fill_2004.v4p
+$FC ushcn_fill_2004.v4p.f filnet_subs_2004.4p.f -o $bin/ushcn_fill_2004.v4p
 
 cd $cwd
