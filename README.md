@@ -25,6 +25,11 @@ The following changes have been made in order to get the source code to compile 
 * Added `src/test/resources/data/test-station-meta-v3.txt` as a copy of `build/test-station-meta-v3.txt` to get the tests to pass
 * Added a `.gitignore`
 * Added this `README.md` file
+* Added TOB adjustment pipeline (`TOBMain`, `TOBUtils`, `TOBTestUnits`) and supporting TOB property keys (`tob.*`).  
+  The TOB pipeline was reconstructed by combining the documented fragments in the
+  NOAA v4 source with the fully working v52i implementation. Where v4 logic was
+  incomplete, the v52i behavior was used to fill in gaps while preserving the
+  original v4 interfaces and data flow.
 
 ## Prerequisites
 
@@ -155,6 +160,30 @@ This program does not seem to take direct command-line arguments for its core fu
 PHAMain
 ```
 *(Note: Execution likely requires specific input data files and directories to be present as defined in the properties file).*
+
+## TOBMain
+
+*NOTE:* This program has been reconstructed based on the TOB code in v4 as well as the previous v3 TOB code.
+The Fortran 95 code for TOB adjustment was not part of the original tarball from NOAA.
+
+This program applies the Time of Observation Bias (TOB) adjustments to monthly data.
+It reads station metadata and `.his` history, computes Karl et al. bias tables, and
+writes adjusted data to the TOB output directory specified by `tob.*` properties.
+
+### Usage
+
+TOBMain is configured via a properties file (e.g., `tob.properties`) and uses
+`tob.path.station-element-data-in`, `tob.path.station-element-data-out`, and
+`tob.start-year` (optionally overridden by `tob.start-from-history`). It also
+uses `tob.input-data-type` to determine the per-station input file suffix.
+Additional flags include `tob.backfill-if-first-nonblank` and
+`tob.pause-on-blank-after-nonblank`.
+
+### Example
+
+```bash
+bin/TOBMain -p data/tob.properties
+```
 
 ## PHATestOutput
 
