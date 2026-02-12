@@ -32,6 +32,8 @@ The following changes have been made in order to get the source code to compile 
   NOAA v4 source with the fully working v52i implementation. Where v4 logic was
   incomplete, the v52i behavior was used to fill in gaps while preserving the
   original v4 interfaces and data flow.
+* Added Python helpers in `src/python/` to build inputs, reconstruct histories, and compare outputs.
+  These helper scripts were added in this reconstruction and were **not** included in NOAA's original `ghcnm.src.v4.03172025.tar` source release.
 
 ## Prerequisites
 
@@ -42,6 +44,7 @@ Building this project requires the following tools installed on your system:
 *   `python3` (for dependency generation)
 *   `gawk` (runtime dependency for some scripts)
 *   `go` (Go 1.22+, for building the `PHAview` webapp)
+*   `python` (Python 3.14+, for running the helpers)
 
 Alternatively, you can use Docker to build and run the project in a containerized environment (see Docker Usage section below).
 
@@ -58,7 +61,7 @@ This project uses `make` to manage the build process.
     ```bash
     make all
     ```
-    This will compile all Fortran 77 and Fortran 95 source files located in `src/f` and `src/f95`, AWK wrappers from `src/awk`, and the Go viewer webapp (`bin/PHAview`) from `src/go`.
+    This will compile all Fortran 77 and Fortran 95 source files located in `src/f` and `src/f95` respectively.
 3.  **Output:**
     *   Compiled object files (`*.o`, `*.mod`) will be placed in the `./obj/` directory.
     *   Final executables and executable scripts will be placed in the `./bin/` directory.
@@ -122,6 +125,7 @@ A `Dockerfile` is provided for building and running the project within a Docker 
 *   `src/incl`: Contains Fortran `INCLUDE` files (`.inc`).
 *   `src/awk`: Contains AWK scripts (`.awk`) that are made executable in the build process.
 *   `src/go`: Contains the added Go viewer webapp (UI + HTTP API). This directory was added in this reconstruction and was not included in the original NOAA source tarball.
+*   `src/python`: Contains added Python helper scripts for input preparation, history reconstruction, and output comparison. This directory was added in this reconstruction and was not included in the original NOAA source tarball.
 *   `src/test/resources/data`: Contains data files used for testing.
 *   `build/`: Contains test configuration files (`.properties`) and potentially test logs.
 *   `obj/`: Stores intermediate object (`.o`) and module (`.mod`) files (Git ignored).
@@ -136,6 +140,12 @@ It supports visualizing station series, QC include/ignore toggles, and compariso
 This webapp was not present in NOAA's original `ghcnm.src.v4.03172025.tar` tarball; it was added as part of this reconstructed repository.
 
 For usage details, see `src/go/README.md`.
+
+## Python Helpers (Added)
+
+Python helper scripts have been added under `src/python` for data conversion and comparison workflows (for example, QCU/QCF transformations and directory comparisons).
+
+These helper scripts were not present in NOAA's original `ghcnm.src.v4.03172025.tar` tarball; they were added as part of this reconstructed repository.
 
 ## Inferred details
 
