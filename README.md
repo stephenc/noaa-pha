@@ -46,7 +46,31 @@ Useful targets:
 
 ## Quick Start (TOB + PHA)
 
-1. Download published inputs and station-history sources:
+Recommended: run the scripted quickstart:
+
+```bash
+./quickstart_tob.sh
+```
+
+The script conditionally downloads upstream inputs (only when the remote file is newer),
+reconstructs inputs/history, runs TOB + PHA, then launches the viewer at
+`http://localhost:8080/` (use `--no-viewer` to skip).
+
+To force FTP endpoints for the GHCN files:
+
+```bash
+NOAA_GHCN_BASE_URL=ftp://ftp.ncei.noaa.gov/pub/data/ghcn/v4 ./quickstart_tob.sh
+```
+
+Manual equivalent:
+
+1. Build all binaries and helpers:
+
+```bash
+make
+```
+
+2. Download published inputs and station-history sources:
 
 ```bash
 mkdir -p data
@@ -56,14 +80,14 @@ curl -L -o data/phr.txt.zip https://www.ncei.noaa.gov/access/homr/file/phr.txt.z
 curl -L -o data/mshr_enhanced.txt.zip https://www.ncei.noaa.gov/access/homr/file/mshr_enhanced.txt.zip
 ```
 
-2. Reconstruct the local input/output workspace:
+3. Reconstruct the local input/output workspace:
 
 ```bash
 python3 src/python/qcu_to_inputs.py --qcu-tar data/ghcnm.tavg.latest.qcu.tar.gz --base data
 python3 src/python/qcf_to_outputs.py --qcf-tar data/ghcnm.tavg.latest.qcf.tar.gz --base data
 ```
 
-3. Reconstruct TOB history files (`data/input/history/*.his`) from QCU/QCF deltas:
+4. Reconstruct TOB history files (`data/input/history/*.his`) from QCU/QCF deltas:
 
 ```bash
 python3 src/python/qcufdelta_to_his.py \
@@ -75,17 +99,21 @@ python3 src/python/qcufdelta_to_his.py \
   --tob-bin bin/TOBMain
 ```
 
-4. Generate TOB-adjusted monthly data, then run PHA:
+5. Generate TOB-adjusted monthly data, then run PHA:
 
 ```bash
 bin/TOBMain -p data/tob.properties
 bin/PHAMain -p data/tob.properties
 ```
 
-5. Optional: launch the viewer:
+6. Optional: launch the viewer:
 
 ```bash
-bin/PHAview --dir /path/to/primary --ref /path/to/reference --inventory /path/to/inventory
+bin/PHAview \
+  --dir data/output/adj/tavg \
+  --ref data/output/qcf/tavg \
+  --ref2 data/input/tob/tavg \
+  --inventory data/input/station.inv
 ```
 
 Then open: `http://localhost:8080/`
