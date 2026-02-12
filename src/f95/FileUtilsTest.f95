@@ -40,9 +40,9 @@ contains
     integer :: unit2
  
     unit1 = get_available_file_unit()
-    open(unit=unit1)
+    open(unit=unit1, status='scratch')
     unit2 = get_available_file_unit()
-    open(unit=unit2)
+    open(unit=unit2, status='scratch')
 
     call assert_true(unit1 /= unit2, "file units should be different.")
 

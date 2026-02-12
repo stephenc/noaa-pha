@@ -15,6 +15,8 @@ ABS_F95_DIR = $(ABS_SRC_DIR)/f95
 ABS_AWK_DIR = $(ABS_SRC_DIR)/awk
 ABS_OBJ_DIR = $(CURDIR)/obj
 ABS_BIN_DIR = $(CURDIR)/bin
+ABS_GO_DIR = $(ABS_SRC_DIR)/go
+GO = go
 
 # --- Cross-Platform Python ---
 PYTHON := $(shell command -v python3 || command -v python)
@@ -30,6 +32,8 @@ F77_PROGRAMS = ushcn_corr.v5a.combo ushcn_dist.v6.combo ushcn_fill.v4p
 AWK_SOURCES = $(wildcard $(ABS_AWK_DIR)/*.awk)
 # Define target executable names (same basename, no extension, in bin dir)
 AWK_TARGETS = $(patsubst $(ABS_AWK_DIR)/%.awk, $(ABS_BIN_DIR)/%, $(AWK_SOURCES))
+GO_VIEWER_SOURCES = $(wildcard $(ABS_GO_DIR)/*.go) $(wildcard $(ABS_GO_DIR)/static/*) $(ABS_GO_DIR)/go.mod $(wildcard $(ABS_GO_DIR)/go.sum)
+GO_VIEWER_BIN = $(ABS_BIN_DIR)/PHAview
 
 # --- Prerequisites ---
 # Ensure directories exist before trying to use them
@@ -48,14 +52,17 @@ deps.mk: $(F77_SOURCES) $(F95_SOURCES) $(DEPS_SCRIPT) $(MAKEFILE_PATH) | $(DIRS)
 	@cd $(CURDIR) && $(PYTHON) "$(DEPS_SCRIPT)" # Run python script from project root
 
 .PHONY: all
-all: deps.mk $(PROGRAMS:%=$(ABS_BIN_DIR)/%) $(AWK_TARGETS) ## Build all programs (F77 and F95) defined in deps.mk
+all: deps.mk $(PROGRAMS:%=$(ABS_BIN_DIR)/%) $(AWK_TARGETS) $(GO_VIEWER_BIN) ## Build all programs (F77/F95, AWK, and Go viewer)
+
+.PHONY: phaview
+phaview: $(GO_VIEWER_BIN) ## Build the Go viewer binary (bin/PHAview)
 
 .PHONY: test
 test: unit-test output-test ## Run all tests
 
 .PHONY: unit-test
-unit-test: $(ABS_BIN_DIR)/PHATestUnits ## Run unit tests
-	"$<" -d 20160316 -longflag test
+unit-test: $(ABS_BIN_DIR)/PHATestUnits $(ABS_BIN_DIR)/TOBTestUnits ## Run unit tests
+	$(foreach bin,$^,"$(bin)" -d 20160316 -longflag test &&) true
 
 .PHONY: output-test
 output-test: $(ABS_BIN_DIR)/PHATestOutput ## Run output tests
@@ -98,5 +105,8 @@ $(ABS_BIN_DIR)/ushcn_dist.v6.combo: $(ABS_OBJ_DIR)/ushcn_dist.v6.combo.o | $(DIR
 # For multiple object files, list them explicitly quoted instead of using $^
 $(ABS_BIN_DIR)/ushcn_fill.v4p: $(ABS_OBJ_DIR)/ushcn_fill.v4p.o $(ABS_OBJ_DIR)/filnet_subs.v4p.o | $(DIRS)
 	$(FC) $(FCFLAGS) $(F77FLAGS) "$(ABS_OBJ_DIR)/ushcn_fill.v4p.o" "$(ABS_OBJ_DIR)/filnet_subs.v4p.o" -o "$@"
+
+$(GO_VIEWER_BIN): $(GO_VIEWER_SOURCES) | $(DIRS)
+	cd "$(ABS_GO_DIR)" && "$(GO)" build -o "$@" .
 
 -include deps.mk

@@ -62,9 +62,8 @@ contains
       exists = .false.
     else
       exists = .true.
+      close(file_unit)
     endif
-
-    close(file_unit)
 
   end function does_file_exist
 
@@ -100,9 +99,10 @@ contains
     file_unit = get_available_file_unit()
 
     open(unit=file_unit, file=file_path, status='old', iostat=open_status)
-    if(open_status > 0) then
+    if(open_status /= 0) then
       call log_error("FileUtils::get_file_lines: Could not open file to get lines "//trim(file_path)//" status " &
                     //trim(log_string(open_status)))
+      return
     endif
 
     call log_debug("File open: "//trim(file_path)//  &
@@ -136,14 +136,15 @@ contains
     file_identifier = get_available_file_unit()
     line_count = 0
     open(unit=file_identifier, file=file_path, status='old', iostat=open_status)
-    if(open_status > 0) then
+    if(open_status /= 0) then
       call log_error("FileUtils::count_file_lines: Could not open file to count lines "//trim(file_path)//" status " &
                     //log_string(open_status))
+      return
     endif
     
     do
       read(file_identifier, '(a)', iostat=read_status) line
-      if (read_status == -1) exit
+      if (read_status /= 0) exit
 
       line_count = line_count + 1
     enddo
