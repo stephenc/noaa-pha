@@ -8,7 +8,7 @@ if [ $# -lt $reqparm ]
 then
   echo "Not all command line input defined. Please enter"
   echo '   $1 - Elem ( max min avg )'
-  echo '   $2 - metafile name in realworld/meta'
+  echo '   $2 - metafile name in data/realworld/meta'
   echo '   $3 - USHCN Base directory'
   exit
 fi
@@ -22,14 +22,14 @@ mfile=$2
 USHCNBASE=$3
 
 # MODIFY - define the metadir path for preparatory files
-metadir=$USHCNBASE/realworld/meta
+metadir=$USHCNBASE/data/realworld/meta
 # set station list file (input)
 metafile=$metadir/$mfile
 # set station distance neighborhood file (output)
 distfile=$metadir/$mfile.dist
 
 # MODIFY - define the log directory path for all text output
-logdir=$USHCNBASE/realworld/log
+logdir=$USHCNBASE/data/realworld/log
 
 # MODIFY - define the bin directory path to the compiled codes
 bin=$USHCNBASE/bin

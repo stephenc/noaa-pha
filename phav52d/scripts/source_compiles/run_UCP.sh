@@ -16,6 +16,12 @@ then
   exit
 fi 
 
+if [ -z "${USHCNBASE:-}" ]
+then
+  echo "USHCNBASE is not set"
+  exit
+fi
+
 conus=$1
 # runid=$1.DBUG.MLY.USHCN
 runid=$2.FAST.MLY.USHCN
@@ -42,6 +48,7 @@ else
 fi
 
 basefile=~/USHCN/v2/conus/auto_update/$conus
+bin=$USHCNBASE/bin
 
 dtag=`date +%y%m%d%H%M`
 
@@ -64,7 +71,7 @@ outfile=$basefile/output/$runid.$dtag.$inelem.$ireg.$oproc.out
 if [ $jproc == "X" ]
 then
   echo "FULL UCP: $runid oproc:$oproc i:$ielem elem:$inelem dtag:$dtag"
-    nice /home/cwilliam/USHCN/inhomog/source_expand/$runid -Q 1.46 -S 18 -s 5 -P -o $oproc -d 1 \
+    nice $bin/$runid -Q 1.46 -S 18 -s 5 -P -o $oproc -d 1 \
       -T 100 -l -e $ielem -p $iproc -c 0 -t 1 -q $iproc  -n $corrfile -m  $metafile -O . \
       -C $incand $outcand -N $incoop $outcoop -u $oproc.$dtag.$ielem.$ireg > $outfile
   else
@@ -72,13 +79,13 @@ then
     for jrnl in $list
     do
       echo "JRNL UCP: $runid oproc:$oproc i:$ielem elem:$inelem dtag:$dtag jrnl:$jrnl"
-      nice /home/cwilliam/USHCN/inhomog/source_expand/$runid -Q 1.46 -S 18 -s 5 -P -o $oproc -d 1 \
+      nice $bin/$runid -Q 1.46 -S 18 -s 5 -P -o $oproc -d 1 \
         -T 100 -l -e $ielem -p $iproc -c 0 -t 1 -q $iproc -n $corrfile -m  $metafile -O . \
         -C $incand $outcand -N $incoop $outcoop -O . -j $jrnl > $outfile
     done
   fi  
   echo "FULL FILL: $runid oproc:$oproc i:$ielem elem:$inelem dtag:$dtag"
-  nice /home/cwilliam/USHCN/ushcn_lib/src/ushcn_fill_2004.v4p -d 1 -u 0 -e $ielem -p WMs.$oproc \
+  nice $bin/ushcn_fill_2004.v4p -d 1 -u 0 -e $ielem -p WMs.$oproc \
     -q WMs.$oproc -i WMc.$oproc -o FLs.$oproc -j FLc.$oproc -n $corrfile -c $metafile  -C $outcand \
     -N $outcoop > $basefile/output/fill2004.$ireg.$inelem.$dtag.$oproc.out
 done    

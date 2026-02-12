@@ -1,14 +1,15 @@
 #!/bin/sh
 
 # set number of required parameters
-reqparm=`expr 3`
+reqparm=`expr 4`
 
 if [ $# -lt $reqparm ]
 then
   echo "Not all command line input defined. Please enter"
-  echo '   $1 - Elem ( max min avg )'
-  echo '   $2 - metafile name in realworld/meta'
-  echo '   $3 - USHCN Base directory'
+  echo '  $1 - Elem ( max min avg )'
+  echo '  $2 is the output process id (i.e. 52d)'
+  echo '  $3 is metafile name in data/realworld/meta'
+  echo '  $4 is the USHCN Base directory'
   exit
 fi
 
@@ -17,8 +18,9 @@ dtag=`date +%Y%m%d%H%M`
 
 # set meteorological element (max, min, avg - temperature: pcp - precipitation)
 elem=$1
-mfile=$2
-USHCNBASE=$3
+ver=$2
+mfile=$3
+USHCNBASE=$4
 
 if [ $elem == "max" ]
 then
@@ -41,24 +43,28 @@ else
 fi      
 
 # MODIFY - define the metadir path for preparatory files
-metadir=$USHCNBASE/realworld/meta
+metadir=$USHCNBASE/data/realworld/meta
 # set station list file (input)
 metafile=$metadir/$mfile
 # set station distance neighborhood file (input)
 distfile=$metadir/$mfile.dist
 # set final station neighborhood file (output)
 corrfile=$metadir/$mfile.corr
-rm -f $corrfile
-
+ 
 # MODIFY - define the input raw data file directory path
-datadir=$USHCNBASE/realworld/monthly
+datadir=$USHCNBASE/data/realworld/monthly
+
+# ensure the output directories are created
+if [ ! -d $datadir/FLs.$ver ]; then mkdir -p $datadir/FLs.$ver; fi 
 
 # MODIFY - define the log directory path for all text output
-logdir=$USHCNBASE/realworld/log
+logdir=$USHCNBASE/data/realworld/log
 
 # MODIFY - define the bin directory path to the compiled codes
 bin=$USHCNBASE/bin
 
-echo "Generate the correlation network file"
-$bin/ushcn_corr_2004.v3 2009 $iel -u 0 -p raw -d $distfile -m $metafile \
-  -o $corrfile -C $datadir -N $datadir > $logdir/corr.$elem.$dtag.log
+echo "Fillin UCP series for $elem.$dtag.$ver"  
+nice $bin/ushcn_fill_2004.v4p -d 0 -u 0 -e $iel \
+  -p WMs.$ver -q WMs.$ver -i WMc.$ver -o FLs.$ver -j FLc.$ver \
+  -n $corrfile -c $metafile  -C $datadir -N $datadir \
+  > $logdir/fill2004.$elem.$dtag.$ver.out

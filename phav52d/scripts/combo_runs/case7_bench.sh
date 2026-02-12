@@ -22,7 +22,7 @@ iproc=raw
 bin=$USHCNBASE/bin
 
 # base directory with benchmark data
-base=$USHCNBASE/src_codes/benchmark
+base=$USHCNBASE/data/benchmark/case7
 
 # directory with corr/meta/input data files
 corrdir=$base/corr
@@ -54,4 +54,3 @@ echo "CASE7_BENCH FULL UCP: $runid oproc:$oproc dtag:$dtag"
 nice $bin/$runid -Q 1.46 -S 18 -s 5 -P -o $oproc -d 1 -T 100 -l -e 3 \
   -R -21 -p $iproc -q $iproc -c 0 -t 1 -n $corrfile -C $datadir $datadir \
   -r $mattdata -m $metafile -N $datadir $datadir -O . > $logfile
-

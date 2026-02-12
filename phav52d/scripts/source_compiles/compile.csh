@@ -2,11 +2,11 @@
 
 # upgraded parameter list to include ANNUAL as well as MONTHLY - see inhomog.parm.system.....incl
 
-@ reqparm = 2
+@ reqparm = 3
 
 if($#argv < $reqparm) then
   echo "Compile the USHCN inhomog application"
-  echo "  USAGE: compile.csh comptype net_def"
+  echo "  USAGE: compile.csh comptype net_def USHCNBASE"
   echo "     where"
   echo "           comptype is the compilation options for debugging or fast"
   echo "               Current comptype are:"
@@ -26,13 +26,13 @@ echo "Entering :" $0 $*
 set comptype = $1
 set net_def = $2
 set USHCNBASE = $3
-setenv $USHCNBASE
+setenv USHCNBASE $USHCNBASE
 
 # Update for each USHCN v2 update
 set version = UCPM24aM21fC6bL1Si6cR5aH1
 set time_def = MLY
-set SCRIPTS = $USHCNBASE/src_codes/lib/scripts
-set SRC = $USHCNBASE/src_codes/lib/pha_src
+set SCRIPTS = $USHCNBASE/phav52d/scripts/source_compiles
+set SRC = $USHCNBASE/phav52d/source_expand
 set BIN = $USHCNBASE/bin
 
 set cwd = `pwd`
@@ -49,4 +49,3 @@ echo "End $binfile Compilation"
 
 echo "Leaving :" $0
 cd $cwd
-

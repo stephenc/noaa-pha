@@ -28,19 +28,19 @@
   Number of candidate stations in meta:  0
   Time resolution (0-ann;1-mthly):  1
   Cand-Ref Network Input file :
- $USHCNBASE/src_codes/benchmark/corr/case7.corr.ann                                                                   
+ $USHCNBASE/data/benchmark/case7/corr/case7.corr.ann                                                                   
   Base Candidate Input Directory 
- $USHCNBASE/src_codes/benchmark/monthly/
+ $USHCNBASE/data/benchmark/case7/monthly/
   Base Candidate Output Directory: 
- $USHCNBASE/src_codes/benchmark/monthly/
+ $USHCNBASE/data/benchmark/case7/monthly/
   Matt data Input file :
- $USHCNBASE/src_codes/benchmark/corr/case7.data.txt
+ $USHCNBASE/data/benchmark/case7/corr/case7.data.txt
   Matt meta Input file :
- $USHCNBASE/src_codes/benchmark/corr/case7.meta.clip50
+ $USHCNBASE/data/benchmark/case7/corr/case7.meta.clip50
   Base Coop Input Directory: 
- $USHCNBASE/src_codes/benchmark/monthly/
+ $USHCNBASE/data/benchmark/case7/monthly/
   Base Coop Output Directory: 
- $USHCNBASE/src_codes/benchmark/monthly/
+ $USHCNBASE/data/benchmark/case7/monthly/
   Directory for Test or HOFN output files : ./                                                                                                                                  
   No Region specified - All stations will be output
   NOTE: NO CANDIDATE STATIONS - ALL COOP DATA
@@ -77,7 +77,7 @@
 
 
 # This segment gives the output of the initial "split/merge" process on each pair of stations
-#   The main processing module is: lib/pha_src/splitmerge.v21f.f
+#   The main processing module is: phav52d/source_expand/splitmerge.v21f.f
 #   A synopsis of the process begins around line 211 in: documentation/modules/SPLITMERGE.change.log
 
 # Network shows the current closed network being processed (for real world runs usually just 1; for

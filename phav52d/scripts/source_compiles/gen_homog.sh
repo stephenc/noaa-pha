@@ -1,26 +1,30 @@
 #!/bin/sh
 
 # set number of required parameters
-reqparm=`expr 4`
+reqparm=`expr 6`
 
 if [ $# -lt $reqparm ]
 then
   echo "Not all command line input defined. Please enter"
-  echo '  $1 - Elem ( max min avg )'
-  echo '  $2 is the output process id (i.e. 52d)'
-  echo '  $3 is metafile name in realworld/meta'
-  echo '  $4 is the USHCN Base directory'
+  echo '  $1 is the current UCP routine, for example:'
+  echo '     UCPM24aM21fC6bL1Si6cR5aH1.FAST.MLY.USHCN'
+  echo '  $2 is the Element ( max min avg )'
+  echo '  $3 is the input process id (i.e. raw)'
+  echo '  $4 is the output process id (i.e. 52d)'
+  echo '  $5 is metafile name in data/realworld/meta'
+  echo '  $6 is the USHCN Base directory'
   exit
 fi
 
 # set the date tag for this run
 dtag=`date +%Y%m%d%H%M`
 
-# set meteorological element (max, min, avg - temperature: pcp - precipitation)
-elem=$1
-ver=$2
-mfile=$3
-USHCNBASE=$4
+ucp=$1
+elem=$2
+iproc=$3
+oproc=$4
+mfile=$5
+USHCNBASE=$6
 
 if [ $elem == "max" ]
 then
@@ -43,7 +47,7 @@ else
 fi      
 
 # MODIFY - define the metadir path for preparatory files
-metadir=$USHCNBASE/realworld/meta
+metadir=$USHCNBASE/data/realworld/meta
 # set station list file (input)
 metafile=$metadir/$mfile
 # set station distance neighborhood file (input)
@@ -52,19 +56,19 @@ distfile=$metadir/$mfile.dist
 corrfile=$metadir/$mfile.corr
  
 # MODIFY - define the input raw data file directory path
-datadir=$USHCNBASE/realworld/monthly
+datadir=$USHCNBASE/data/realworld/monthly
 
 # ensure the output directories are created
-if [ ! -d $datadir/FLs.$ver ]; then mkdir -p $datadir/FLs.$ver; fi 
+if [ ! -d $datadir/WMs.$oproc ]; then mkdir -p $datadir/WMs.$oproc; fi 
 
 # MODIFY - define the log directory path for all text output
-logdir=$USHCNBASE/realworld/log
+logdir=$USHCNBASE/data/realworld/log
 
 # MODIFY - define the bin directory path to the compiled codes
 bin=$USHCNBASE/bin
 
-echo "Fillin UCP series for $elem.$dtag.$ver"  
-nice $bin/ushcn_fill_2004.v4p -d 0 -u 0 -e $iel \
-  -p WMs.$ver -q WMs.$ver -i WMc.$ver -o FLs.$ver -j FLc.$ver \
-  -n $corrfile -c $metafile  -C $datadir -N $datadir \
-  > $logdir/fill2004.$elem.$dtag.$ver.out
+echo "Generate UCP series using: $ucp.$dtag.$elem.$oproc"
+nice $bin/$ucp -Q 1.46 -S 18 -s 5 -P -d 1 -T 100 -l -c 0 -t 1 \
+  -o $oproc -e $iel -p $iproc -q $iproc -n $corrfile -m $metafile \
+  -C $datadir $datadir -N $datadir $datadir -O . \
+  -u $oproc.$dtag.$elem > $logdir/$ucp.$dtag.$elem.$oproc.out

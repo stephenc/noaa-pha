@@ -1,7 +1,7 @@
 cwd=`pwd`
 
 # Go to the directory with the source code
-src=$USHCNBASE/src_codes/lib/src
+src=$USHCNBASE/phav52d/lib_src
 bin=$USHCNBASE/bin
 cd $src
 

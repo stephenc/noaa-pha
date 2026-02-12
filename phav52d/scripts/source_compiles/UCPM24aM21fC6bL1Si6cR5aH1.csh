@@ -15,8 +15,8 @@ echo "Entering :" $0 $*
 
 set binfile = $1
 set comptype = $2
-set SCRIPTS = $USHCNBASE/src_codes/lib/scripts
-set SRC = $USHCNBASE/src_codes/lib/pha_src
+set SCRIPTS = $USHCNBASE/phav52d/scripts/source_compiles
+set SRC = $USHCNBASE/phav52d/source_expand
 
 set cwd = `pwd`
 cd $SRC
