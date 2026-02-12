@@ -1,0 +1,1710 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>PHA Viewer</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .row { margin-bottom: 12px; }
+    .canvas-stack { position: relative; display: block; margin-bottom: 10px; }
+    .plot-canvas { border: 1px solid #ddd; display: block; }
+    .hover-canvas {
+      position: absolute;
+      left: 0;
+      top: 0;
+      pointer-events: none;
+    }
+    .btn-group { display: inline-flex; margin-left: 8px; }
+    .btn {
+      border: 1px solid #999;
+      background: #eee;
+      color: #333;
+      padding: 6px 10px;
+      cursor: pointer;
+      margin-right: -1px;
+    }
+    .btn:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+    .btn:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; margin-right: 0; }
+    .btn.active { background: #2f6db3; color: #fff; border-color: #2f6db3; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .plot-wrap { position: relative; display: inline-block; }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 4px solid #cfd6df;
+      border-top-color: #2f6db3;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="plot-wrap">
+    <div id="chartLegend" class="row" style="margin-bottom: 6px; font-size: 12px; color: #333;">
+      <span id="legendLeft" style="margin-right: 16px;">
+        <span id="legendLeftSwatch" style="display:inline-block;width:10px;height:10px;background:#1f77b4;margin-right:6px;"></span>
+        <span id="legendLeftText">dir: __LEFT_LABEL__</span>
+      </span>
+      <span id="legendRight" style="margin-right: 16px;">
+        <span id="legendRightSwatch" style="display:inline-block;width:10px;height:10px;background:#ff7f0e;margin-right:6px;"></span>
+        <span id="legendRightText">ref: __RIGHT_LABEL__</span>
+      </span>
+      <span id="legendRight2">
+        <span id="legendRight2Swatch" style="display:inline-block;width:10px;height:10px;background:#2ca02c;margin-right:6px;"></span>
+        <span id="legendRight2Text">ref2: __RIGHT2_LABEL__</span>
+      </span>
+      <span id="hoverDate" style="margin-left: 16px; font-weight: bold; color: #555;"></span>
+    </div>
+    <div id="chartStack" class="canvas-stack">
+      <canvas id="chart" class="plot-canvas" width="900" height="300"></canvas>
+      <canvas id="chartHover" class="hover-canvas" width="900" height="300"></canvas>
+    </div>
+    <div id="diffStack" class="canvas-stack">
+      <canvas id="diff" class="plot-canvas" width="900" height="300"></canvas>
+      <canvas id="diffHover" class="hover-canvas" width="900" height="300"></canvas>
+    </div>
+    <div id="chartLoading" class="overlay"><div class="spinner"></div></div>
+  </div>
+
+  <div class="row">
+    <div class="btn-group">
+      <button class="btn active" id="qcIgnore" data-qc="ignore">Ignore QC</button>
+      <button class="btn" id="qcInclude" data-qc="include">Include QC</button>
+    </div>
+  <div class="btn-group">
+    <button class="btn" id="granMonthly" data-granularity="monthly">Monthly</button>
+    <button class="btn active" id="granYearly" data-granularity="yearly">Yearly</button>
+    <button class="btn" id="granCount" data-granularity="count">Count</button>
+  </div>
+  <div class="btn-group" id="compareButtonGroup">
+    <button class="btn" id="modeRef1Toggle" data-mode="ref1" style="display:none;">ref1</button>
+    <button class="btn" id="modeRef2Toggle" data-mode="ref2" style="display:none;">ref2</button>
+    <button class="btn" id="modeCompare" data-mode="compare">Compare</button>
+    <button class="btn active" id="modeInspect" data-mode="inspect">Inspect</button>
+  </div>
+    <div class="btn-group">
+      <button class="btn active" id="aggNumerical" data-agg="overall">Numerical</button>
+      <button class="btn" id="aggGridded" data-agg="grid">Gridded</button>
+    </div>
+    <div class="btn-group">
+      <button class="btn active" id="scopeAll" data-scope="all">All</button>
+      <button class="btn" id="scopeSelection" data-scope="selection">Selection</button>
+    </div>
+  </div>
+  <div class="row" style="position: relative;">
+    <input id="stationFilter" placeholder="Filter stations..." />
+    <div class="btn-group">
+      <button class="btn active" id="sortId" data-sort="id">ID</button>
+      <button class="btn" id="sortBpAsc" data-sort="bp_asc">BP ↑</button>
+      <button class="btn" id="sortBpDesc" data-sort="bp_desc">BP ↓</button>
+    </div>
+    <select id="stationSelect" size="6" multiple></select>
+    <button id="selectAllBtn" onclick="selectAllStations()" disabled>Select all</button>
+    <span id="stationCount" class="small"></span>
+    <div id="stationLoading" class="overlay"><div class="spinner"></div></div>
+  </div>
+
+  <script>
+    const HAS_REF = __HAS_REF__;
+    const HAS_REF2 = __HAS_REF2__;
+    let currentView = {mode: 'overall', compare: true, compareMode: 'ref1', stationIds: [], scope: 'all'};
+    let pendingStationIds = null;
+    let suppressHistory = false;
+    let lastStationIds = [];
+    const STORAGE_FILTER = 'viewer.filter';
+    const STORAGE_SORT = 'viewer.sort';
+    let hoverState = {year: null, dateStr: null};
+    const HOVER_CANVAS_MAP = { chart: 'chartHover', diff: 'diffHover' };
+    const DEFAULT_SERIES_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c'];
+    const LEGEND_TEXTS = {
+      left: document.getElementById('legendLeftText').textContent,
+      right: document.getElementById('legendRightText').textContent,
+      right2: document.getElementById('legendRight2Text').textContent
+    };
+    const plotPointCache = { chart: [], diff: [] };
+    const selectionState = {
+      chart: { active: false, startX: null, currentX: null, stats: null },
+      diff: { active: false, startX: null, currentX: null, stats: null }
+    };
+    const pinnedReadoutState = {
+      chart: { active: false, x: null, year: null, dateStr: null, items: [] },
+      diff: { active: false, x: null, year: null, dateStr: null, items: [] }
+    };
+    let activeDragCanvasId = null;
+    let pointerDownState = null;
+
+    function parseYearFraction(t) {
+      if (!t) return null;
+      const parts = t.split('-');
+      const year = parseInt(parts[0], 10);
+      if (isNaN(year)) return null;
+      if (parts.length > 1) {
+        const month = parseInt(parts[1], 10);
+        if (!isNaN(month)) return year + (month - 1) / 12.0;
+      }
+      return year;
+    }
+
+    function formatDateFromYear(year) {
+      if (!Number.isFinite(year)) return '';
+      if (granularity() === 'monthly') {
+        const yearInt = Math.floor(year);
+        let monthInt = Math.floor((year - yearInt) * 12) + 1;
+        if (monthInt < 1) monthInt = 1;
+        if (monthInt > 12) monthInt = 12;
+        return `${yearInt}-${String(monthInt).padStart(2, '0')}`;
+      }
+      return Math.round(year).toString();
+    }
+
+    function getCanvasGeometry(canvas) {
+      const padLeft = parseFloat(canvas.dataset.padLeft || 0);
+      const padRight = parseFloat(canvas.dataset.padRight || 0);
+      const padTop = parseFloat(canvas.dataset.padTop || 0);
+      const padBottom = parseFloat(canvas.dataset.padBottom || 0);
+      const axisMin = parseFloat(canvas.dataset.axisMin || 0);
+      const axisMax = parseFloat(canvas.dataset.axisMax || 1);
+      const w = canvas.width - padLeft - padRight;
+      const h = canvas.height - padTop - padBottom;
+      return { padLeft, padRight, padTop, padBottom, axisMin, axisMax, w, h };
+    }
+
+    function xToYear(x, geom) {
+      const denom = (geom.axisMax - geom.axisMin) || 1;
+      const t = (x - geom.padLeft) / geom.w;
+      return geom.axisMin + t * denom;
+    }
+
+    function yearToX(year, geom) {
+      const denom = (geom.axisMax - geom.axisMin) || 1;
+      const t = (year - geom.axisMin) / denom;
+      return geom.padLeft + t * geom.w;
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function parseColorToRgb(color) {
+      if (!color || typeof color !== 'string') return null;
+      const raw = color.trim();
+      const hex = raw.startsWith('#') ? raw.slice(1) : '';
+      if (hex.length === 3) {
+        const r = parseInt(hex[0] + hex[0], 16);
+        const g = parseInt(hex[1] + hex[1], 16);
+        const b = parseInt(hex[2] + hex[2], 16);
+        if ([r, g, b].every(Number.isFinite)) return { r, g, b };
+      }
+      if (hex.length === 6) {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        if ([r, g, b].every(Number.isFinite)) return { r, g, b };
+      }
+      const rgbMatch = raw.match(/^rgba?\(([^)]+)\)$/i);
+      if (!rgbMatch) return null;
+      const parts = rgbMatch[1].split(',').map(v => parseFloat(v.trim()));
+      if (parts.length < 3 || !parts.slice(0, 3).every(Number.isFinite)) return null;
+      return { r: parts[0], g: parts[1], b: parts[2] };
+    }
+
+    function paleColor(color) {
+      const rgb = parseColorToRgb(color);
+      if (!rgb) return '#fff7c8';
+      const mix = 0.78;
+      const r = Math.round(rgb.r + (255 - rgb.r) * mix);
+      const g = Math.round(rgb.g + (255 - rgb.g) * mix);
+      const b = Math.round(rgb.b + (255 - rgb.b) * mix);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    function activeRefName() {
+      if (HAS_REF2 && !HAS_REF) return 'ref2';
+      if (HAS_REF && HAS_REF2 && currentView.compareMode === 'ref2') return 'ref2';
+      return 'ref1';
+    }
+
+    function formatSelectionSeriesLabel(label) {
+      if (!label) return 'series';
+      if (label === 'left' || label === 'mean' || label === 'grid-mean' || label === 'count' || label === 'grid-count') return 'dir';
+      if (label === 'right') return activeRefName();
+      if (label === 'ref1') return 'ref1';
+      if (label === 'ref2') return 'ref2';
+      if (label === 'diff') return `dir-${activeRefName()}`;
+      if (label === 'dir-ref1') return 'dir-ref1';
+      if (label === 'dir-ref2') return 'dir-ref2';
+      return label;
+    }
+
+    function pickSelectionSeries(canvasId, seriesEntries) {
+      if (!seriesEntries || seriesEntries.length === 0) return [];
+      if (canvasId === 'diff') {
+        const diffSeries = seriesEntries.filter(s => s.label === 'dir-ref1' || s.label === 'dir-ref2' || s.label === 'diff');
+        if (diffSeries.length > 0) return diffSeries.slice(0, 2);
+        return seriesEntries.slice(0, 2);
+      }
+      const dirSeries = seriesEntries.filter(s =>
+        s.label === 'left' || s.label === 'mean' || s.label === 'grid-mean' || s.label === 'count' || s.label === 'grid-count' || s.label === 'dir'
+      );
+      const refSeries = seriesEntries.filter(s => s.label === 'ref1' || s.label === 'ref2' || s.label === 'right');
+      if (dirSeries.length > 0 && refSeries.length > 0) {
+        return [dirSeries[0], ...refSeries.slice(0, 2)];
+      }
+      if (dirSeries.length > 0) return [dirSeries[0]];
+      if (refSeries.length > 0) return refSeries.slice(0, 2);
+      return seriesEntries.slice(0, 3);
+    }
+
+    function clearSelection(canvasId) {
+      if (!selectionState[canvasId]) return;
+      selectionState[canvasId].active = false;
+      selectionState[canvasId].startX = null;
+      selectionState[canvasId].currentX = null;
+      selectionState[canvasId].stats = null;
+    }
+
+    function clearPinnedReadout(canvasId) {
+      if (!pinnedReadoutState[canvasId]) return;
+      pinnedReadoutState[canvasId].active = false;
+      pinnedReadoutState[canvasId].x = null;
+      pinnedReadoutState[canvasId].year = null;
+      pinnedReadoutState[canvasId].dateStr = null;
+      pinnedReadoutState[canvasId].items = [];
+    }
+
+    function hasVisibleSelection(canvasId) {
+      const state = selectionState[canvasId];
+      return !!(state &&
+        state.startX !== null &&
+        state.currentX !== null &&
+        Math.abs(state.currentX - state.startX) >= 2);
+    }
+
+    function parseSelectionRange(text) {
+      if (!text) return null;
+      const parts = text.split(',');
+      if (parts.length !== 2) return null;
+      const startYear = parseFloat(parts[0]);
+      const currentYear = parseFloat(parts[1]);
+      if (!Number.isFinite(startYear) || !Number.isFinite(currentYear)) return null;
+      return { startYear, currentYear };
+    }
+
+    function getSelectionRangesFromHash() {
+      const hash = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+      const params = new URLSearchParams(hash);
+      return {
+        chart: parseSelectionRange(params.get('sel_chart')),
+        diff: parseSelectionRange(params.get('sel_diff'))
+      };
+    }
+
+    function getSelectionYearsFromState(canvasId) {
+      if (!hasVisibleSelection(canvasId)) return null;
+      const state = selectionState[canvasId];
+      const canvas = document.getElementById(canvasId);
+      if (!state || !canvas || state.startX === null || state.currentX === null) return null;
+      const geom = getCanvasGeometry(canvas);
+      if (!(geom.w > 0 && geom.h > 0)) return null;
+      return {
+        startYear: xToYear(state.startX, geom),
+        currentYear: xToYear(state.currentX, geom)
+      };
+    }
+
+    function syncSelectionHashFromState() {
+      if (suppressHistory) return;
+      const hash = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+      const params = new URLSearchParams(hash);
+      const chartRange = getSelectionYearsFromState('chart');
+      const diffRange = getSelectionYearsFromState('diff');
+      if (chartRange) params.set('sel_chart', `${chartRange.startYear.toFixed(6)},${chartRange.currentYear.toFixed(6)}`);
+      else params.delete('sel_chart');
+      if (diffRange) params.set('sel_diff', `${diffRange.startYear.toFixed(6)},${diffRange.currentYear.toFixed(6)}`);
+      else params.delete('sel_diff');
+      const hashString = params.toString();
+      const url = `${location.pathname}${location.search}${hashString ? `#${hashString}` : ''}`;
+      history.replaceState(null, '', url);
+    }
+
+    function applySelectionFromHash(canvasId) {
+      const ranges = getSelectionRangesFromHash();
+      const range = ranges[canvasId];
+      if (!range) return;
+      const state = selectionState[canvasId];
+      const canvas = document.getElementById(canvasId);
+      if (!state || !canvas) return;
+      const geom = getCanvasGeometry(canvas);
+      if (!(geom.w > 0 && geom.h > 0)) return;
+      const startX = clamp(yearToX(range.startYear, geom), geom.padLeft, geom.padLeft + geom.w);
+      const currentX = clamp(yearToX(range.currentYear, geom), geom.padLeft, geom.padLeft + geom.w);
+      if (Math.abs(currentX - startX) < 2) return;
+      state.active = false;
+      state.startX = startX;
+      state.currentX = currentX;
+      computeSelectionStats(canvasId);
+    }
+
+    function computePinnedReadout(canvasId, x) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const geom = getCanvasGeometry(canvas);
+      if (!(geom.w > 0 && geom.h > 0)) return;
+      const clampedX = clamp(x, geom.padLeft, geom.padLeft + geom.w);
+      const targetYear = xToYear(clampedX, geom);
+      const selectedSeries = pickSelectionSeries(canvasId, plotPointCache[canvasId] || []);
+      const items = selectedSeries.map(series => {
+        if (!series.points || series.points.length === 0) return null;
+        let nearest = series.points[0];
+        let bestDist = Math.abs(nearest.year - targetYear);
+        for (let i = 1; i < series.points.length; i++) {
+          const point = series.points[i];
+          const dist = Math.abs(point.year - targetYear);
+          if (dist < bestDist) {
+            nearest = point;
+            bestDist = dist;
+          }
+        }
+        return {
+          label: formatSelectionSeriesLabel(series.label),
+          color: series.color || '#666',
+          value: nearest.v,
+          pointYear: nearest.year
+        };
+      }).filter(Boolean);
+      if (items.length === 0) {
+        clearPinnedReadout(canvasId);
+        return;
+      }
+      pinnedReadoutState[canvasId] = {
+        active: true,
+        x: clampedX,
+        year: targetYear,
+        dateStr: formatDateFromYear(targetYear),
+        items
+      };
+    }
+
+    function computeSelectionStats(canvasId) {
+      const state = selectionState[canvasId];
+      const canvas = document.getElementById(canvasId);
+      if (!state || !canvas || state.startX === null || state.currentX === null) return;
+      const geom = getCanvasGeometry(canvas);
+      if (!(geom.w > 0 && geom.h > 0)) {
+        state.stats = null;
+        return;
+      }
+      const leftX = Math.min(state.startX, state.currentX);
+      const rightX = Math.max(state.startX, state.currentX);
+      const startYear = xToYear(leftX, geom);
+      const endYear = xToYear(rightX, geom);
+      const selectedSeries = pickSelectionSeries(canvasId, plotPointCache[canvasId] || []);
+      const statsItems = selectedSeries.map(series => {
+        const values = series.points
+          .filter(p => p.year >= startYear && p.year <= endYear)
+          .map(p => p.v);
+        if (values.length === 0) return null;
+        const count = values.length;
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const avg = values.reduce((acc, v) => acc + v, 0) / count;
+        const variance = values.reduce((acc, v) => acc + (v - avg) * (v - avg), 0) / count;
+        return {
+          label: formatSelectionSeriesLabel(series.label),
+          color: series.color,
+          count,
+          min,
+          max,
+          avg,
+          stddev: Math.sqrt(variance)
+        };
+      }).filter(Boolean);
+      if (statsItems.length === 0) {
+        state.stats = null;
+        return;
+      }
+      state.stats = {
+        startLabel: formatDateFromYear(startYear),
+        endLabel: formatDateFromYear(endYear),
+        items: statsItems
+      };
+    }
+
+    function drawSelectionOverlay(baseCanvasId, ctx, geom) {
+      const baseCanvas = document.getElementById(baseCanvasId);
+      if (!baseCanvas) return;
+      const state = selectionState[baseCanvasId];
+      if (!state || state.startX === null || state.currentX === null) return;
+      const left = Math.min(state.startX, state.currentX);
+      const right = Math.max(state.startX, state.currentX);
+      const width = right - left;
+      if (width <= 0) return;
+
+      ctx.fillStyle = 'rgba(255, 244, 189, 0.35)';
+      ctx.fillRect(left, geom.padTop, width, geom.h);
+      ctx.strokeStyle = 'rgba(183, 152, 51, 0.95)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(left, geom.padTop, width, geom.h);
+
+      if (!state.stats || !state.stats.items || state.stats.items.length === 0) return;
+      const fmt2 = (v) => Number.isFinite(v) ? v.toFixed(2) : 'n/a';
+      const fmt3 = (v) => Number.isFinite(v) ? v.toFixed(3) : 'n/a';
+      const boxPad = 8;
+      const lineHeight = 15;
+      const boxGap = 8;
+      const margin = 4;
+      const yAxisPadding = 8;
+      const yAxisZoneLeft = geom.padLeft - yAxisPadding;
+      const yAxisZoneRight = geom.padLeft + yAxisPadding;
+      ctx.font = '12px sans-serif';
+      const boxDefs = state.stats.items.map(item => {
+        const lines = [
+          item.label,
+          `${state.stats.startLabel} to ${state.stats.endLabel}`,
+          `n: ${item.count}`,
+          `min: ${fmt2(item.min)}`,
+          `max: ${fmt2(item.max)}`,
+          `range: ${fmt2(item.max - item.min)}`,
+          `avg: ${fmt3(item.avg)}`,
+          `std dev: ${fmt3(item.stddev)}`
+        ];
+        const textWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+        const widthPx = Math.ceil(textWidth + boxPad * 2);
+        const heightPx = lineHeight * lines.length + boxPad * 2;
+        return { lines, widthPx, heightPx, color: item.color || '#666' };
+      });
+      function drawOneBox(def, boxX, boxY) {
+        ctx.fillStyle = paleColor(def.color);
+        ctx.fillRect(boxX, boxY, def.widthPx, def.heightPx);
+        ctx.strokeStyle = def.color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, def.widthPx, def.heightPx);
+        ctx.fillStyle = '#2c2c2c';
+        def.lines.forEach((line, idx) => {
+          ctx.fillText(line, boxX + boxPad, boxY + boxPad + lineHeight * (idx + 0.75));
+        });
+      }
+
+      function placementsFit(placements) {
+        const inBounds = placements.every(p =>
+          p.x >= margin &&
+          p.y >= margin &&
+          p.x + p.def.widthPx <= baseCanvas.width - margin &&
+          p.y + p.def.heightPx <= baseCanvas.height - margin
+        );
+        if (!inBounds) return false;
+        const avoidsYAxis = placements.every(p =>
+          p.side !== 'left' || (p.x + p.def.widthPx <= yAxisZoneLeft || p.x >= yAxisZoneRight)
+        );
+        if (!avoidsYAxis) return false;
+        for (let i = 0; i < placements.length; i++) {
+          for (let j = i + 1; j < placements.length; j++) {
+            const a = placements[i];
+            const b = placements[j];
+            const overlaps = !(a.x + a.def.widthPx <= b.x ||
+              b.x + b.def.widthPx <= a.x ||
+              a.y + a.def.heightPx <= b.y ||
+              b.y + b.def.heightPx <= a.y);
+            if (overlaps) return false;
+          }
+        }
+        return true;
+      }
+
+      function drawPlacements(placements) {
+        placements.forEach(p => drawOneBox(p.def, p.x, p.y));
+      }
+
+      const horizontalGap = boxGap;
+      const topY = clamp(
+        geom.padTop,
+        margin,
+        baseCanvas.height - margin - Math.max(...boxDefs.map(def => def.heightPx))
+      );
+
+      function rowWidth(defs) {
+        if (!defs || defs.length === 0) return 0;
+        return defs.reduce((sum, def) => sum + def.widthPx, 0) + horizontalGap * (defs.length - 1);
+      }
+
+      function placeRow(defs, startX, side = 'inside') {
+        const placements = [];
+        let x = startX;
+        defs.forEach(def => {
+          placements.push({ def, x, y: topY, side });
+          x += def.widthPx + horizontalGap;
+        });
+        return placements;
+      }
+
+      function centeredInsideX(defs) {
+        const total = rowWidth(defs);
+        const insideMin = left + boxGap;
+        const insideMax = right - boxGap - total;
+        let centered = left + (width - total) / 2;
+        if (insideMin <= insideMax) {
+          centered = clamp(centered, insideMin, insideMax);
+        }
+        return centered;
+      }
+
+      function tryPlacements(placements) {
+        if (!placementsFit(placements)) return false;
+        drawPlacements(placements);
+        return true;
+      }
+
+      function outsideStartXForSide(outsideSide, defs) {
+        return outsideSide === 'left'
+          ? left - boxGap - rowWidth(defs)
+          : right + boxGap;
+      }
+
+      const startOutsideSide = state.startX <= state.currentX ? 'left' : 'right';
+      const endOutsideSide = startOutsideSide === 'left' ? 'right' : 'left';
+
+      function buildPlacements(startCount, endCount) {
+        const insideCount = Math.max(0, totalBoxes - startCount - endCount);
+        let startDefs = [];
+        let endDefs = [];
+        let insideDefs = [];
+
+        // Keep visible left-to-right content order stable regardless of drag direction.
+        // Physical group order is:
+        // - start on left:  start, inside, end
+        // - start on right: end, inside, start
+        if (startOutsideSide === 'left') {
+          startDefs = boxDefs.slice(0, startCount);
+          insideDefs = boxDefs.slice(startCount, startCount + insideCount);
+          endDefs = boxDefs.slice(startCount + insideCount, startCount + insideCount + endCount);
+        } else {
+          endDefs = boxDefs.slice(0, endCount);
+          insideDefs = boxDefs.slice(endCount, endCount + insideCount);
+          startDefs = boxDefs.slice(endCount + insideCount, endCount + insideCount + startCount);
+        }
+
+        const placements = [];
+        if (startDefs.length > 0) {
+          placements.push(...placeRow(
+            startDefs,
+            outsideStartXForSide(startOutsideSide, startDefs),
+            startOutsideSide
+          ));
+        }
+        if (endDefs.length > 0) {
+          placements.push(...placeRow(
+            endDefs,
+            outsideStartXForSide(endOutsideSide, endDefs),
+            endOutsideSide
+          ));
+        }
+        if (insideDefs.length > 0) {
+          placements.push(...placeRow(insideDefs, centeredInsideX(insideDefs), 'inside'));
+        }
+        return placements;
+      }
+
+      // Priority order:
+      // 1) outside on selection start side
+      // 2) outside on growing-end side
+      // 3) inside only if no all-outside arrangement fits
+      const totalBoxes = boxDefs.length;
+      for (let startCount = totalBoxes; startCount >= 0; startCount--) {
+        const endCount = totalBoxes - startCount;
+        const placements = buildPlacements(startCount, endCount);
+        if (placements.length > 0 && tryPlacements(placements)) return;
+      }
+
+      for (let startCount = totalBoxes; startCount >= 0; startCount--) {
+        const remaining = totalBoxes - startCount;
+        for (let endCount = remaining - 1; endCount >= 0; endCount--) {
+          const placements = buildPlacements(startCount, endCount);
+          if (placements.length > 0 && tryPlacements(placements)) return;
+        }
+      }
+
+      const fallbackWidth = rowWidth(boxDefs);
+      const fallbackX = clamp(
+        left + (width - fallbackWidth) / 2,
+        Math.max(margin, geom.padLeft + yAxisPadding),
+        baseCanvas.width - margin - fallbackWidth
+      );
+      drawPlacements(placeRow(boxDefs, fallbackX));
+    }
+
+    function drawPinnedReadoutOverlay(baseCanvasId, ctx, geom) {
+      const baseCanvas = document.getElementById(baseCanvasId);
+      const state = pinnedReadoutState[baseCanvasId];
+      if (!baseCanvas || !state || !state.active || !state.items || state.items.length === 0) return;
+      const x = clamp(state.x, geom.padLeft, geom.padLeft + geom.w);
+      const margin = 4;
+      const boxGap = 8;
+      const boxPad = 8;
+      const lineHeight = 15;
+      const yAxisPadding = 8;
+      const yAxisZoneLeft = geom.padLeft - yAxisPadding;
+      const yAxisZoneRight = geom.padLeft + yAxisPadding;
+      ctx.font = '12px sans-serif';
+
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x, geom.padTop);
+      ctx.lineTo(x, geom.padTop + geom.h);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const fmt = (v) => Number.isFinite(v) ? v.toFixed(2) : 'n/a';
+      const boxes = state.items.map(item => {
+        const lines = [
+          item.label,
+          `date: ${state.dateStr}`,
+          `value: ${fmt(item.value)}`
+        ];
+        const textWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+        return {
+          lines,
+          widthPx: Math.ceil(textWidth + boxPad * 2),
+          heightPx: lineHeight * lines.length + boxPad * 2,
+          color: item.color || '#666'
+        };
+      });
+      const topY = clamp(geom.padTop, margin, baseCanvas.height - margin - Math.max(...boxes.map(b => b.heightPx)));
+
+      function fits(boxX, boxY, box, side = 'inside') {
+        const inBounds = boxX >= margin &&
+          boxY >= margin &&
+          boxX + box.widthPx <= baseCanvas.width - margin &&
+          boxY + box.heightPx <= baseCanvas.height - margin;
+        if (!inBounds) return false;
+        if (side === 'left' && !(boxX + box.widthPx <= yAxisZoneLeft || boxX >= yAxisZoneRight)) return false;
+        return true;
+      }
+
+      function drawBox(box, boxX, boxY) {
+        ctx.fillStyle = paleColor(box.color);
+        ctx.fillRect(boxX, boxY, box.widthPx, box.heightPx);
+        ctx.strokeStyle = box.color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, box.widthPx, box.heightPx);
+        ctx.fillStyle = '#2c2c2c';
+        box.lines.forEach((line, idx) => {
+          ctx.fillText(line, boxX + boxPad, boxY + boxPad + lineHeight * (idx + 0.75));
+        });
+      }
+
+      const horizontalGap = boxGap;
+
+      function rowWidth(row) {
+        if (!row || row.length === 0) return 0;
+        return row.reduce((sum, box) => sum + box.widthPx, 0) + horizontalGap * (row.length - 1);
+      }
+
+      function placeRow(row, startX, side = 'inside') {
+        const placements = [];
+        let cursor = startX;
+        row.forEach(box => {
+          placements.push({ box, x: cursor, y: topY, side });
+          cursor += box.widthPx + horizontalGap;
+        });
+        return placements;
+      }
+
+      function tryDraw(placements) {
+        if (!placements.every(p => fits(p.x, p.y, p.box, p.side))) return false;
+        for (let i = 0; i < placements.length; i++) {
+          for (let j = i + 1; j < placements.length; j++) {
+            const a = placements[i];
+            const b = placements[j];
+            const overlaps = !(a.x + a.box.widthPx <= b.x ||
+              b.x + b.box.widthPx <= a.x ||
+              a.y + a.box.heightPx <= b.y ||
+              b.y + b.box.heightPx <= a.y);
+            if (overlaps) return false;
+          }
+        }
+        placements.forEach(p => drawBox(p.box, p.x, p.y));
+        return true;
+      }
+
+      // Prefer outside placement without stacking.
+      if (tryDraw(placeRow(boxes, x + boxGap, 'right'))) return;
+      if (tryDraw(placeRow(boxes, x - boxGap - rowWidth(boxes), 'left'))) return;
+
+      // If all boxes do not fit on one side, split between sides.
+      for (let leftCount = 1; leftCount < boxes.length; leftCount++) {
+        const leftRow = boxes.slice(0, leftCount);
+        const rightRow = boxes.slice(leftCount);
+        const placements = [
+          ...placeRow(leftRow, x - boxGap - rowWidth(leftRow), 'left'),
+          ...placeRow(rightRow, x + boxGap, 'right')
+        ];
+        if (tryDraw(placements)) return;
+      }
+
+      const totalWidth = rowWidth(boxes);
+      const fallbackX = clamp(
+        x - totalWidth / 2,
+        Math.max(margin, geom.padLeft + yAxisPadding),
+        baseCanvas.width - margin - totalWidth
+      );
+      placeRow(boxes, fallbackX, 'inside').forEach(p => drawBox(p.box, p.x, p.y));
+    }
+
+    // Initialize button visibility based on available refs
+    (function() {
+      // Always use compact ref toggles; disable unavailable refs.
+      const ref1Btn = document.getElementById('modeRef1Toggle');
+      const ref2Btn = document.getElementById('modeRef2Toggle');
+      ref1Btn.style.display = 'inline-block';
+      ref2Btn.style.display = 'inline-block';
+      ref1Btn.disabled = !HAS_REF;
+      ref2Btn.disabled = !HAS_REF2;
+      if (!HAS_REF) ref1Btn.classList.remove('active');
+      if (!HAS_REF2) ref2Btn.classList.remove('active');
+      document.getElementById('modeCompare').style.display = 'none';
+      document.getElementById('modeInspect').style.display = 'none';
+    })();
+
+    function setButtonActive(id, active) {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      if (active) btn.classList.add('active'); else btn.classList.remove('active');
+    }
+
+    function setActiveInGroup(ids, activeId) {
+      ids.forEach(id => setButtonActive(id, id === activeId));
+    }
+
+    function getSelectedStationIds() {
+      return Array.from(document.getElementById('stationSelect').selectedOptions).map(o => o.value).filter(Boolean);
+    }
+
+    function getEffectiveStationIds(scope) {
+      const selected = getSelectedStationIds();
+      if (scope === 'station' && selected.length === 0 && pendingStationIds && pendingStationIds.length > 0) {
+        return pendingStationIds.slice();
+      }
+      return selected;
+    }
+
+    function resolveViewMode(scope, agg, selectedCount) {
+      if (scope !== 'station') return agg;
+      if (agg === 'grid' && selectedCount > 1) return 'grid';
+      return 'station';
+    }
+
+    function syncGriddedAvailability(scope, selectedCount) {
+      const gridBtn = document.getElementById('aggGridded');
+      const numericBtn = document.getElementById('aggNumerical');
+      const disableGrid = scope === 'station' && selectedCount <= 1;
+      gridBtn.disabled = disableGrid;
+      if (disableGrid && gridBtn.classList.contains('active')) {
+        gridBtn.classList.remove('active');
+        numericBtn.classList.add('active');
+      }
+      return disableGrid;
+    }
+
+    function getCompareStateFromButtons() {
+      const ref1On = HAS_REF && document.getElementById('modeRef1Toggle').classList.contains('active');
+      const ref2On = HAS_REF2 && document.getElementById('modeRef2Toggle').classList.contains('active');
+      if (ref1On && ref2On) return { compare: true, compareMode: 'both' };
+      if (ref1On) return { compare: true, compareMode: 'ref1' };
+      if (ref2On) return { compare: true, compareMode: 'ref2' };
+      return { compare: false, compareMode: null };
+    }
+
+    function applyCompareButtons(compare, compareMode) {
+      const ref1Btn = document.getElementById('modeRef1Toggle');
+      const ref2Btn = document.getElementById('modeRef2Toggle');
+      ref1Btn.disabled = !HAS_REF;
+      ref2Btn.disabled = !HAS_REF2;
+      const ref1On = compare && HAS_REF && (compareMode === 'both' || compareMode === 'ref1');
+      const ref2On = compare && HAS_REF2 && (compareMode === 'both' || compareMode === 'ref2');
+      setButtonActive('modeRef1Toggle', ref1On);
+      setButtonActive('modeRef2Toggle', ref2On);
+    }
+
+    function updateURLFromUI(push, stationIdsOverride) {
+      if (suppressHistory) return;
+      const params = new URLSearchParams();
+
+      // Determine compare mode
+      const mode = getCompareStateFromButtons().compareMode;
+      if (mode === 'both') params.set('compare', 'both');
+      else if (mode === 'ref1') params.set('compare', 'ref1');
+      else if (mode === 'ref2') params.set('compare', 'ref2');
+      else params.set('compare', '0');
+
+      params.set('agg', document.getElementById('aggGridded').classList.contains('active') ? 'grid' : 'overall');
+      params.set('scope', document.getElementById('scopeSelection').classList.contains('active') ? 'station' : 'all');
+      params.set('include_qc', includeQc());
+      params.set('granularity', granularity());
+      let stationIds = stationIdsOverride;
+      if (!stationIds) {
+        stationIds = getSelectedStationIds();
+        if (stationIds.length === 0 && currentView.scope === 'station' && lastStationIds.length > 0) {
+          stationIds = lastStationIds.slice();
+        }
+      }
+      if (stationIds && stationIds.length > 0) {
+        lastStationIds = stationIds.slice();
+      }
+      if (stationIds.length > 0) params.set('station_id', stationIds.join(','));
+      const url = `${location.pathname}?${params.toString()}${location.hash || ''}`;
+      if (push) history.pushState(null, '', url); else history.replaceState(null, '', url);
+    }
+
+    function applyStateFromURL() {
+      const params = new URLSearchParams(window.location.search);
+      const compareParam = params.get('compare') || '0';
+      let compare, compareMode;
+
+      // Two-toggle mode with graceful fallback for missing refs.
+      compare = false;
+      compareMode = null;
+      if (compareParam === 'both') {
+        if (HAS_REF && HAS_REF2) {
+          compare = true;
+          compareMode = 'both';
+        } else if (HAS_REF) {
+          compare = true;
+          compareMode = 'ref1';
+        } else if (HAS_REF2) {
+          compare = true;
+          compareMode = 'ref2';
+        }
+      } else if ((compareParam === 'ref1' || compareParam === '1') && HAS_REF) {
+        compare = true;
+        compareMode = 'ref1';
+      } else if (compareParam === 'ref2' && HAS_REF2) {
+        compare = true;
+        compareMode = 'ref2';
+      } else if (compareParam === '1' && !HAS_REF && HAS_REF2) {
+        compare = true;
+        compareMode = 'ref2';
+      }
+
+      const agg = params.get('agg') === 'grid' ? 'grid' : 'overall';
+      let scope = params.get('scope') === 'station' ? 'station' : 'all';
+      const includeQC = params.get('include_qc') === '1';
+      const granParam = params.get('granularity');
+      const gran = granParam === 'monthly' ? 'monthly' : (granParam === 'count' ? 'count' : 'yearly');
+      const stationParam = params.get('station_id') || '';
+      if (stationParam) {
+        scope = 'station';
+      }
+      const storedFilter = sessionStorage.getItem(STORAGE_FILTER) || '';
+      const storedSort = sessionStorage.getItem(STORAGE_SORT) || 'id';
+
+      // Set active buttons
+      applyCompareButtons(compare, compareMode);
+
+      setActiveInGroup(['aggNumerical', 'aggGridded'], agg === 'grid' ? 'aggGridded' : 'aggNumerical');
+      setActiveInGroup(['scopeAll', 'scopeSelection'], scope === 'station' ? 'scopeSelection' : 'scopeAll');
+      setActiveInGroup(['qcIgnore', 'qcInclude'], includeQC ? 'qcInclude' : 'qcIgnore');
+      setActiveInGroup(['granMonthly', 'granYearly', 'granCount'],
+        gran === 'monthly' ? 'granMonthly' : (gran === 'count' ? 'granCount' : 'granYearly'));
+      setActiveInGroup(['sortId', 'sortBpAsc', 'sortBpDesc'], storedSort === 'bp_asc' ? 'sortBpAsc' : (storedSort === 'bp_desc' ? 'sortBpDesc' : 'sortId'));
+      if (stationParam) {
+        pendingStationIds = stationParam.split(',').filter(Boolean);
+        lastStationIds = pendingStationIds.slice();
+      }
+      if (storedFilter) {
+        document.getElementById('stationFilter').value = storedFilter;
+      }
+      const ids = pendingStationIds || [];
+      const mode = resolveViewMode(scope, agg, ids.length);
+      syncGriddedAvailability(scope, ids.length);
+      if (mode !== 'grid') {
+        setActiveInGroup(['aggNumerical', 'aggGridded'], 'aggNumerical');
+      } else {
+        setActiveInGroup(['aggNumerical', 'aggGridded'], 'aggGridded');
+      }
+      currentView = {mode, compare, compareMode, stationIds: ids, scope};
+      updateLegend(compare, compareMode);
+    }
+    function setActiveButtons() {
+      applyCompareButtons(currentView.compare, currentView.compareMode);
+      setActiveInGroup(['aggNumerical', 'aggGridded'], currentView.mode === 'grid' ? 'aggGridded' : 'aggNumerical');
+      setActiveInGroup(['scopeAll', 'scopeSelection'], currentView.scope === 'station' ? 'scopeSelection' : 'scopeAll');
+      syncGriddedAvailability(currentView.scope, (currentView.stationIds || []).length);
+    }
+    function includeQc() {
+      return document.getElementById('qcInclude').classList.contains('active') ? '1' : '0';
+    }
+    function granularity() {
+      if (document.getElementById('granMonthly').classList.contains('active')) return 'monthly';
+      if (document.getElementById('granCount').classList.contains('active')) return 'count';
+      return 'yearly';
+    }
+    function drawSeries(canvasId, seriesList, yLabel) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.dataset.hasSeries = '0';
+      plotPointCache[canvasId] = [];
+      clearSelection(canvasId);
+      clearPinnedReadout(canvasId);
+      const hoverCanvasId = HOVER_CANVAS_MAP[canvasId];
+      if (hoverCanvasId) {
+        const hoverCanvas = document.getElementById(hoverCanvasId);
+        if (hoverCanvas) {
+          hoverCanvas.getContext('2d').clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+        }
+      }
+      if (!seriesList || seriesList.length === 0) return;
+      const allPoints = seriesList.flatMap(s => s.points);
+      if (allPoints.length === 0) return;
+      const isDiffCanvas = canvasId === 'diff';
+      const ys = allPoints.map(p => p.v);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const yDomainMin = isDiffCanvas ? Math.min(minY, 0) : minY;
+      const yDomainMax = isDiffCanvas ? Math.max(maxY, 0) : maxY;
+      const pad = { left: 58, right: 20, top: 25, bottom: 40 };
+      const w = canvas.width - pad.left - pad.right;
+      const h = canvas.height - pad.top - pad.bottom;
+      function yToPx(y) {
+        if (yDomainMax === yDomainMin) return pad.top + h / 2;
+        return pad.top + (yDomainMax - y) / (yDomainMax - yDomainMin) * h;
+      }
+      // Axes
+      ctx.strokeStyle = '#999';
+      ctx.beginPath();
+      ctx.moveTo(pad.left, pad.top);
+      ctx.lineTo(pad.left, pad.top + h);
+      ctx.lineTo(pad.left + w, pad.top + h);
+      ctx.stroke();
+
+      // Y label
+      ctx.fillStyle = '#333';
+      ctx.font = '12px sans-serif';
+      ctx.save();
+      ctx.translate(18, pad.top + h / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText(yLabel, 0, 0);
+      ctx.restore();
+
+      // Y ticks
+      const yTicks = 5;
+      ctx.fillStyle = '#555';
+      for (let i = 0; i <= yTicks; i++) {
+        const y = pad.top + (i / yTicks) * h;
+        ctx.beginPath();
+        ctx.moveTo(pad.left - 4, y);
+        ctx.lineTo(pad.left, y);
+        ctx.stroke();
+        const val = yDomainMax - (i / yTicks) * (yDomainMax - yDomainMin);
+        const label = val.toFixed(1);
+        const labelWidth = ctx.measureText(label).width;
+        ctx.fillText(label, pad.left - 8 - labelWidth, y + 4);
+      }
+
+      if (isDiffCanvas) {
+        const yZero = yToPx(0);
+        ctx.save();
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, yZero);
+        ctx.lineTo(pad.left + w, yZero);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // X labels (30-year ticks)
+      const yearVals = allPoints.map(p => parseYearFraction(p.t)).filter(y => y !== null);
+      plotPointCache[canvasId] = seriesList.map((series, idx) => {
+        const resolvedColor = series.color || DEFAULT_SERIES_COLORS[idx] || '#333';
+        return {
+          label: series.label || `series-${idx + 1}`,
+          color: resolvedColor,
+          points: series.points
+            .map(p => ({ year: parseYearFraction(p.t), v: p.v }))
+            .filter(p => p.year !== null && Number.isFinite(p.v))
+        };
+      }).filter(series => series.points.length > 0);
+      const years = yearVals.map(y => Math.floor(y));
+      if (years.length > 0) {
+        const axisMin = Math.min(...yearVals);
+        const axisMax = Math.max(...yearVals);
+        const minYear = Math.floor(axisMin);
+        const maxYear = Math.ceil(axisMax);
+        const denom = (axisMax - axisMin) || 1;
+        const anchor = 1700;
+        const offset = Math.ceil((axisMin - anchor) / 30) * 30;
+        const startTick = anchor + offset;
+        for (let y = startTick; y <= maxYear; y += 30) {
+          const x = pad.left + ((y - axisMin) / denom) * w;
+          ctx.beginPath();
+          ctx.moveTo(x, pad.top + h);
+          ctx.lineTo(x, pad.top + h + 4);
+          ctx.stroke();
+          ctx.fillText(String(y), x - 12, pad.top + h + 16);
+        }
+      }
+      seriesList.forEach((series, idx) => {
+        // Use custom color if specified, otherwise use default palette
+        ctx.strokeStyle = series.color || DEFAULT_SERIES_COLORS[idx] || '#333';
+        ctx.beginPath();
+        series.points.forEach((p, i) => {
+          const yr = parseYearFraction(p.t);
+          const axisMin = Math.min(...yearVals);
+          const axisMax = Math.max(...yearVals);
+          const denom = (axisMax - axisMin) || 1;
+          const t = yr === null ? i / (series.points.length - 1 || 1) : (yr - axisMin) / denom;
+          const x = pad.left + t * w;
+          const y = yToPx(p.v);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      });
+
+      // Store axis info for hover calculation
+      canvas.dataset.padLeft = pad.left;
+      canvas.dataset.padRight = pad.right;
+      canvas.dataset.padTop = pad.top;
+      canvas.dataset.padBottom = pad.bottom;
+      canvas.dataset.axisMin = yearVals.length > 0 ? Math.min(...yearVals) : 0;
+      canvas.dataset.axisMax = yearVals.length > 0 ? Math.max(...yearVals) : 1;
+      canvas.dataset.hasSeries = '1';
+
+      applySelectionFromHash(canvasId);
+      if (hoverCanvasId) {
+        drawHoverOverlay(canvasId, hoverCanvasId);
+      }
+    }
+    function syncHoverCanvasSize(baseCanvasId, hoverCanvasId) {
+      const baseCanvas = document.getElementById(baseCanvasId);
+      const hoverCanvas = document.getElementById(hoverCanvasId);
+      if (!baseCanvas || !hoverCanvas) return;
+      hoverCanvas.width = baseCanvas.width;
+      hoverCanvas.height = baseCanvas.height;
+      hoverCanvas.style.width = `${baseCanvas.width}px`;
+      hoverCanvas.style.height = `${baseCanvas.height}px`;
+    }
+    function drawHoverOverlay(baseCanvasId, hoverCanvasId) {
+      const baseCanvas = document.getElementById(baseCanvasId);
+      const hoverCanvas = document.getElementById(hoverCanvasId);
+      if (!baseCanvas || !hoverCanvas) return;
+      const ctx = hoverCanvas.getContext('2d');
+      ctx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+      const geom = getCanvasGeometry(baseCanvas);
+      if (!(geom.w > 0 && geom.h > 0)) return;
+
+      drawSelectionOverlay(baseCanvasId, ctx, geom);
+      drawPinnedReadoutOverlay(baseCanvasId, ctx, geom);
+
+      if (hoverState.year === null) return;
+      const denom = (geom.axisMax - geom.axisMin) || 1;
+      const t = (hoverState.year - geom.axisMin) / denom;
+      const x = geom.padLeft + t * geom.w;
+      if (x < geom.padLeft || x > geom.padLeft + geom.w) return;
+
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x, geom.padTop);
+      ctx.lineTo(x, geom.padTop + geom.h);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    function redrawHoverOverlays() {
+      drawHoverOverlay('chart', 'chartHover');
+      drawHoverOverlay('diff', 'diffHover');
+    }
+    function updateLegend(compare, compareMode) {
+      const legend = document.getElementById('chartLegend');
+      const left = document.getElementById('legendLeft');
+      const leftSwatch = document.getElementById('legendLeftSwatch');
+      const leftText = document.getElementById('legendLeftText');
+      const right = document.getElementById('legendRight');
+      const rightSwatch = document.getElementById('legendRightSwatch');
+      const rightText = document.getElementById('legendRightText');
+      const right2 = document.getElementById('legendRight2');
+      const right2Swatch = document.getElementById('legendRight2Swatch');
+      const right2Text = document.getElementById('legendRight2Text');
+
+      legend.style.display = 'block';
+      left.style.display = 'inline';
+      leftSwatch.style.background = '#1f77b4';
+      leftText.textContent = LEGEND_TEXTS.left;
+
+      right.style.display = 'none';
+      right2.style.display = 'none';
+      rightSwatch.style.background = '#ff7f0e';
+      right2Swatch.style.background = '#2ca02c';
+      rightText.textContent = LEGEND_TEXTS.right;
+      right2Text.textContent = LEGEND_TEXTS.right2;
+
+      if (!HAS_REF || !compare) return;
+      if (!HAS_REF2) {
+        right.style.display = 'inline';
+        return;
+      }
+
+      if (compareMode === 'both') {
+        right.style.display = 'inline';
+        right2.style.display = 'inline';
+        return;
+      }
+      if (compareMode === 'ref2') {
+        right.style.display = 'inline';
+        rightSwatch.style.background = '#2ca02c';
+        rightText.textContent = LEGEND_TEXTS.right2;
+        return;
+      }
+      right.style.display = 'inline';
+    }
+    function adjustPlotLayout(compare, compareMode) {
+      const chart = document.getElementById('chart');
+      const diff = document.getElementById('diff');
+      const diffStack = document.getElementById('diffStack');
+      if (compare) {
+        chart.height = 300;
+        diffStack.style.display = 'block';
+        diff.height = 300;
+      } else {
+        chart.height = 600;
+        diffStack.style.display = 'none';
+      }
+      updateLegend(compare, compareMode);
+      syncHoverCanvasSize('chart', 'chartHover');
+      syncHoverCanvasSize('diff', 'diffHover');
+    }
+
+    const seriesCache = new Map();
+    let chartRequestId = 0;
+    let chartAbortController = null;
+    async function fetchSeries(mode, compare, compareMode) {
+      const reqId = ++chartRequestId;
+      const stationIds = currentView.stationIds || [];
+      const stationParam = currentView.scope === 'station' ? stationIds.join(',') : '';
+      const compareModeKey = compareMode || 'none';
+      const key = `${mode}|${compare ? 1 : 0}|${compareModeKey}|${includeQc()}|${granularity()}|${stationParam}`;
+      if (seriesCache.has(key)) return seriesCache.get(key);
+      if (chartAbortController) {
+        chartAbortController.abort();
+      }
+      chartAbortController = new AbortController();
+      const loading = document.getElementById('chartLoading');
+      loading.style.display = 'flex';
+      try {
+        // Determine which ref to fetch from
+        let refParam = '';
+        if (compareMode === 'ref2') {
+          refParam = '&ref=2';
+        } else if (compareMode === 'ref1' || compare) {
+          refParam = '&ref=1';
+        }
+
+        const res = await fetch(`/api/series?mode=${mode}&compare=${compare ? '1' : '0'}&include_qc=${includeQc()}&granularity=${granularity()}&station_id=${stationParam}${refParam}`, { signal: chartAbortController.signal });
+        const data = await res.json();
+        if (reqId === chartRequestId) {
+          loading.style.display = 'none';
+          seriesCache.set(key, data);
+        }
+        return data;
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          return null;
+        }
+        loading.style.display = 'none';
+        throw err;
+      }
+    }
+    async function loadSeries(mode, compare, compareMode) {
+      const isCountMode = granularity() === 'count';
+      const chartYLabel = isCountMode
+        ? (mode === 'grid' ? 'Avg Monthly Count / Global Grid Cell' : 'Avg Monthly Valid Count')
+        : 'T (°C)';
+      const diffYLabel = isCountMode
+        ? (mode === 'grid' ? 'ΔAvg Monthly Count / Global Grid Cell' : 'ΔAvg Monthly Valid Count')
+        : 'ΔT (°C)';
+
+      if (HAS_REF && HAS_REF2 && compareMode === 'both') {
+        // Three-way comparison: fetch both refs and combine
+        const ref1Data = await fetchSeries(mode, true, 'ref1');
+        const ref2Data = await fetchSeries(mode, true, 'ref2');
+        if (!ref1Data || !ref2Data) return;
+
+        adjustPlotLayout(true, 'both'); // Always show dual panel for "both" mode
+
+        // Combine series: [left, ref1, ref2]
+        const ref1Series = ref1Data.series || [];
+        const ref2Series = ref2Data.series || [];
+
+        // Extract left series from ref1 (it's the same in both)
+        const leftSeries = ref1Series.find(s => s.label === 'left');
+        const ref1RightSeries = ref1Series.find(s => s.label === 'right');
+        const ref2RightSeries = ref2Series.find(s => s.label === 'right');
+
+        const combinedSeries = [];
+        if (leftSeries) {
+          combinedSeries.push({...leftSeries, color: '#1f77b4'}); // blue
+        }
+        if (ref1RightSeries) {
+          combinedSeries.push({...ref1RightSeries, label: 'ref1', color: '#ff7f0e'}); // orange
+        }
+        if (ref2RightSeries) {
+          combinedSeries.push({...ref2RightSeries, label: 'ref2', color: '#2ca02c'}); // green
+        }
+
+        // Draw both diffs on bottom panel
+        const diffSeries = [];
+        if (ref1Data.diff) {
+          diffSeries.push({label: 'dir-ref1', points: ref1Data.diff, color: '#ff7f0e'});
+        }
+        if (ref2Data.diff) {
+          diffSeries.push({label: 'dir-ref2', points: ref2Data.diff, color: '#2ca02c'});
+        }
+
+        drawSeries('chart', combinedSeries, chartYLabel);
+        drawSeries('diff', diffSeries, diffYLabel);
+
+      } else {
+        const useCompare = compare || (HAS_REF && !compare);
+        const data = await fetchSeries(mode, useCompare, compareMode);
+        if (!data) return;
+        adjustPlotLayout(compare, compareMode);
+        let series = data.series || [];
+        if (!compare && HAS_REF) {
+          const leftOnly = series.filter(s => s.label === 'left');
+          series = leftOnly.length > 0 ? leftOnly : (series.length ? [series[0]] : []);
+        }
+
+        if (compare) {
+          const activeRef = (HAS_REF && HAS_REF2 && compareMode === 'ref2') ? 'ref2' : 'ref1';
+          const rightColor = (HAS_REF && HAS_REF2 && compareMode === 'ref2') ? '#2ca02c' : '#ff7f0e';
+          series = series.map(s => {
+            if (s.label === 'left') return {...s, color: '#1f77b4'};
+            if (s.label === 'right') return {...s, label: activeRef, color: rightColor};
+            return s;
+          });
+        }
+        const activeRef = (HAS_REF && HAS_REF2 && compareMode === 'ref2') ? 'ref2' : 'ref1';
+        const diffColor = (HAS_REF && HAS_REF2 && compareMode === 'ref2') ? '#2ca02c' : '#ff7f0e';
+        const diffLabel = activeRef === 'ref2' ? 'dir-ref2' : 'dir-ref1';
+        const diffSeries = compare && data.diff ? [{label: diffLabel, points: data.diff, color: diffColor}] : [];
+
+        drawSeries('chart', series, chartYLabel);
+        if (compare) {
+          drawSeries('diff', diffSeries, diffYLabel);
+        }
+        if (HAS_REF) {
+          fetchSeries(mode, true, compareMode).catch(() => {});
+        }
+      }
+    }
+    function selectView(mode, compare, compareMode, scope) {
+      const stationIds = getSelectedStationIds();
+      return selectViewWithIds(mode, compare, compareMode, stationIds, scope);
+    }
+    function selectViewWithIds(mode, compare, compareMode, stationIds, scope) {
+      const ids = stationIds || [];
+      const resolvedScope = scope || (document.getElementById('scopeSelection').classList.contains('active') ? 'station' : 'all');
+      currentView = {mode, compare, compareMode, stationIds: ids, scope: resolvedScope};
+      setActiveButtons();
+      loadSeries(mode, compare, compareMode);
+      updateURLFromUI(true, ids);
+    }
+    let stationCache = null;
+    let stationRequestId = 0;
+    function escapeRegExp(input) {
+      return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    function parseStationFilterTokens(raw) {
+      return (raw || '')
+        .trim()
+        .split(/\s+/)
+        .map(token => token.trim())
+        .filter(Boolean)
+        .map(token => {
+          const lower = token.toLowerCase();
+          let target = 'any';
+          let pattern = token;
+          if (lower.startsWith('id:')) {
+            target = 'id';
+            pattern = token.slice(3);
+          } else if (lower.startsWith('name:')) {
+            target = 'name';
+            pattern = token.slice(5);
+          }
+          pattern = pattern.trim();
+          if (!pattern) return null;
+          return {target, pattern: pattern.toLowerCase()};
+        })
+        .filter(Boolean);
+    }
+    function stationTokenMatches(token, idLower, nameLower) {
+      const haystacks = token.target === 'id'
+        ? [idLower]
+        : token.target === 'name'
+          ? [nameLower]
+          : [idLower, nameLower];
+      if (token.pattern.includes('*')) {
+        const wildcard = new RegExp(`^${token.pattern.split('*').map(escapeRegExp).join('.*')}$`, 'i');
+        return haystacks.some(value => wildcard.test(value));
+      }
+      return haystacks.some(value => value.includes(token.pattern));
+    }
+    async function fetchStations() {
+      const reqId = ++stationRequestId;
+      const loading = document.getElementById('stationLoading');
+      loading.style.display = 'flex';
+      const res = await fetch(`/api/stations?include_qc=${includeQc()}`);
+      const data = await res.json();
+      if (reqId === stationRequestId) {
+        loading.style.display = 'none';
+      }
+      stationCache = data;
+      return data;
+    }
+    function applyStations(data) {
+      const filterInput = document.getElementById('stationFilter');
+      const filterTokens = parseStationFilterTokens(filterInput.value || '');
+      let sortMode = 'id';
+      if (document.getElementById('sortBpAsc').classList.contains('active')) sortMode = 'bp_asc';
+      if (document.getElementById('sortBpDesc').classList.contains('active')) sortMode = 'bp_desc';
+      let rows = data.filter(s => {
+        if (filterTokens.length === 0) return true;
+        const idLower = (s.id || '').toLowerCase();
+        const name = (s.name || '').toLowerCase();
+        return filterTokens.some(token => stationTokenMatches(token, idLower, name));
+      });
+      if (sortMode === 'bp_asc') {
+        rows.sort((a, b) => (a.breakpoints ?? 1e9) - (b.breakpoints ?? 1e9));
+      } else if (sortMode === 'bp_desc') {
+        rows.sort((a, b) => (b.breakpoints ?? -1) - (a.breakpoints ?? -1));
+      } else {
+        rows.sort((a, b) => a.id.localeCompare(b.id));
+      }
+      const sel = document.getElementById('stationSelect');
+      sel.innerHTML = '';
+      rows.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        const name = s.name ? ` - ${s.name}` : '';
+        opt.textContent = `${s.id}${name} (bp=${s.breakpoints ?? 'n/a'})`;
+        sel.appendChild(opt);
+      });
+      if (pendingStationIds && pendingStationIds.length > 0) {
+        const idSet = new Set(pendingStationIds);
+        for (const opt of sel.options) {
+          if (idSet.has(opt.value)) opt.selected = true;
+        }
+        pendingStationIds = null;
+        const selected = Array.from(sel.selectedOptions).map(o => o.value).filter(Boolean);
+        if (selected.length > 0) {
+          updateURLFromUI(false, selected);
+        }
+      }
+      const shouldAutoSelectSingleMatch = document.activeElement === filterInput && rows.length === 1 && sel.options.length === 1;
+      const autoSelectedId = shouldAutoSelectSingleMatch ? sel.options[0].value : null;
+      const alreadyCurrentSingle = autoSelectedId !== null &&
+        currentView.mode === 'station' &&
+        currentView.stationIds.length === 1 &&
+        currentView.stationIds[0] === autoSelectedId;
+      if (shouldAutoSelectSingleMatch && !sel.options[0].selected) {
+        sel.options[0].selected = true;
+      }
+      const hasStations = rows.length > 0;
+      document.getElementById('selectAllBtn').disabled = !hasStations;
+      const selCount = sel.selectedOptions.length;
+      document.getElementById('stationCount').textContent = `selected ${selCount} / ${rows.length}`;
+      const scope = document.getElementById('scopeSelection').classList.contains('active') ? 'station' : 'all';
+      syncGriddedAvailability(scope, selCount);
+      if (shouldAutoSelectSingleMatch && !alreadyCurrentSingle) {
+        sel.dispatchEvent(new Event('change'));
+      }
+    }
+    async function loadStations() {
+      const data = stationCache || await fetchStations();
+      applyStations(data);
+    }
+    function selectAllStations() {
+      const sel = document.getElementById('stationSelect');
+      for (const opt of sel.options) {
+        opt.selected = true;
+      }
+      updateStationCount();
+      refreshFromControls();
+    }
+    function updateStationCount() {
+      const sel = document.getElementById('stationSelect');
+      const total = sel.options.length;
+      const selected = sel.selectedOptions.length;
+      document.getElementById('stationCount').textContent = `selected ${selected} / ${total}`;
+    }
+    function refreshFromControls() {
+      // Determine compare mode
+      const compareState = getCompareStateFromButtons();
+      const compare = compareState.compare;
+      const compareMode = compareState.compareMode;
+
+      const agg = document.getElementById('aggGridded').classList.contains('active') ? 'grid' : 'overall';
+      const scope = document.getElementById('scopeSelection').classList.contains('active') ? 'station' : 'all';
+      const stationIds = getEffectiveStationIds(scope);
+      const isGridDisabled = syncGriddedAvailability(scope, stationIds.length);
+      const effectiveAgg = isGridDisabled ? 'overall' : agg;
+      const mode = resolveViewMode(scope, effectiveAgg, stationIds.length);
+      selectViewWithIds(mode, compare, compareMode, stationIds, scope);
+    }
+    document.getElementById('qcIgnore').addEventListener('click', () => {
+      document.getElementById('qcIgnore').classList.add('active');
+      document.getElementById('qcInclude').classList.remove('active');
+      loadStations();
+      refreshFromControls();
+    });
+    document.getElementById('qcInclude').addEventListener('click', () => {
+      document.getElementById('qcInclude').classList.add('active');
+      document.getElementById('qcIgnore').classList.remove('active');
+      loadStations();
+      refreshFromControls();
+    });
+    document.getElementById('granMonthly').addEventListener('click', () => {
+      document.getElementById('granMonthly').classList.add('active');
+      document.getElementById('granYearly').classList.remove('active');
+      document.getElementById('granCount').classList.remove('active');
+      refreshFromControls();
+    });
+    document.getElementById('granYearly').addEventListener('click', () => {
+      document.getElementById('granYearly').classList.add('active');
+      document.getElementById('granMonthly').classList.remove('active');
+      document.getElementById('granCount').classList.remove('active');
+      refreshFromControls();
+    });
+    document.getElementById('granCount').addEventListener('click', () => {
+      document.getElementById('granCount').classList.add('active');
+      document.getElementById('granMonthly').classList.remove('active');
+      document.getElementById('granYearly').classList.remove('active');
+      refreshFromControls();
+    });
+    // Compare mode button handlers
+    ['modeRef1Toggle', 'modeRef2Toggle'].forEach(id => {
+      const btn = document.getElementById(id);
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        btn.classList.toggle('active');
+        refreshFromControls();
+      });
+    });
+    document.getElementById('aggNumerical').addEventListener('click', () => { document.getElementById('aggNumerical').classList.add('active'); document.getElementById('aggGridded').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('aggGridded').addEventListener('click', () => { document.getElementById('aggGridded').classList.add('active'); document.getElementById('aggNumerical').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('scopeAll').addEventListener('click', () => { document.getElementById('scopeAll').classList.add('active'); document.getElementById('scopeSelection').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('scopeSelection').addEventListener('click', () => { document.getElementById('scopeSelection').classList.add('active'); document.getElementById('scopeAll').classList.remove('active'); refreshFromControls(); });
+    document.getElementById('stationFilter').addEventListener('paste', (event) => {
+      const text = event.clipboardData?.getData('text');
+      if (typeof text !== 'string') return;
+      const normalized = text.replace(/\s+/g, ' ').trim();
+      event.preventDefault();
+      const input = document.getElementById('stationFilter');
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? input.value.length;
+      input.value = `${input.value.slice(0, start)}${normalized}${input.value.slice(end)}`;
+      const caret = start + normalized.length;
+      input.setSelectionRange(caret, caret);
+      input.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    document.getElementById('stationFilter').addEventListener('input', () => {
+      const input = document.getElementById('stationFilter');
+      sessionStorage.setItem(STORAGE_FILTER, input.value || '');
+      if (stationCache) applyStations(stationCache);
+      else loadStations();
+    });
+    const sortButtons = ['sortId', 'sortBpAsc', 'sortBpDesc'];
+    sortButtons.forEach(id => {
+      document.getElementById(id).addEventListener('click', () => {
+        sortButtons.forEach(other => document.getElementById(other).classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+        const sortMode = id === 'sortBpAsc' ? 'bp_asc' : (id === 'sortBpDesc' ? 'bp_desc' : 'id');
+        sessionStorage.setItem(STORAGE_SORT, sortMode);
+        if (stationCache) applyStations(stationCache);
+        else loadStations();
+      });
+    });
+    document.getElementById('stationSelect').addEventListener('change', () => {
+      updateStationCount();
+      document.getElementById('scopeSelection').classList.add('active');
+      document.getElementById('scopeAll').classList.remove('active');
+      refreshFromControls();
+    });
+
+    window.addEventListener('load', () => {
+      applyStateFromURL();
+      loadStations();
+      setActiveButtons();
+      refreshFromControls();
+      if (pendingStationIds && pendingStationIds.length > 0) {
+        updateURLFromUI(false, pendingStationIds);
+      }
+    });
+
+    window.addEventListener('popstate', () => {
+      suppressHistory = true;
+      applyStateFromURL();
+      loadStations();
+      setActiveButtons();
+      refreshFromControls();
+      suppressHistory = false;
+    });
+
+    // Hover line functionality
+    function setupHoverLine() {
+      const chartCanvas = document.getElementById('chart');
+      const diffCanvas = document.getElementById('diff');
+      const hoverDateEl = document.getElementById('hoverDate');
+      syncHoverCanvasSize('chart', 'chartHover');
+      syncHoverCanvasSize('diff', 'diffHover');
+
+      function handleMouseMove(e) {
+        const canvas = e.currentTarget;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        if (canvas.dataset.hasSeries !== '1') {
+          hoverState.year = null;
+          hoverState.dateStr = null;
+          hoverDateEl.textContent = '';
+          redrawHoverOverlays();
+          return;
+        }
+        const geom = getCanvasGeometry(canvas);
+        if (!(geom.w > 0 && geom.h > 0)) return;
+
+        if (x >= geom.padLeft && x <= geom.padLeft + geom.w) {
+          const year = xToYear(x, geom);
+          hoverState.year = year;
+          hoverState.dateStr = formatDateFromYear(year);
+          hoverDateEl.textContent = hoverState.dateStr;
+        } else if (!activeDragCanvasId) {
+          hoverState.year = null;
+          hoverState.dateStr = null;
+          hoverDateEl.textContent = '';
+        }
+        if (activeDragCanvasId === canvas.id) {
+          const clampedX = Math.max(geom.padLeft, Math.min(geom.padLeft + geom.w, x));
+          selectionState[canvas.id].currentX = clampedX;
+          computeSelectionStats(canvas.id);
+        }
+        redrawHoverOverlays();
+      }
+
+      function handleMouseLeave() {
+        if (activeDragCanvasId) return;
+        hoverState.year = null;
+        hoverState.dateStr = null;
+        hoverDateEl.textContent = '';
+        redrawHoverOverlays();
+      }
+
+      function handleMouseDown(e) {
+        const canvas = e.currentTarget;
+        if (canvas.dataset.hasSeries !== '1') return;
+        const geom = getCanvasGeometry(canvas);
+        if (!(geom.w > 0 && geom.h > 0)) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        if (x < geom.padLeft || x > geom.padLeft + geom.w) return;
+
+        e.preventDefault();
+        pointerDownState = {
+          canvasId: canvas.id,
+          startX: x,
+          hadSelection: hasVisibleSelection(canvas.id),
+          didDrag: false
+        };
+        activeDragCanvasId = canvas.id;
+        const clampedX = Math.max(geom.padLeft, Math.min(geom.padLeft + geom.w, x));
+        clearSelection(canvas.id);
+        selectionState[canvas.id].active = true;
+        selectionState[canvas.id].startX = clampedX;
+        selectionState[canvas.id].currentX = clampedX;
+        computeSelectionStats(canvas.id);
+        hoverState.year = xToYear(clampedX, geom);
+        hoverState.dateStr = formatDateFromYear(hoverState.year);
+        hoverDateEl.textContent = hoverState.dateStr;
+        redrawHoverOverlays();
+      }
+
+      function handleWindowMouseMove(e) {
+        if (!activeDragCanvasId) return;
+        const canvas = document.getElementById(activeDragCanvasId);
+        if (!canvas) return;
+        const geom = getCanvasGeometry(canvas);
+        if (!(geom.w > 0 && geom.h > 0)) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const clampedX = Math.max(geom.padLeft, Math.min(geom.padLeft + geom.w, x));
+        if (pointerDownState && pointerDownState.canvasId === activeDragCanvasId) {
+          const dragDistance = Math.abs(clampedX - selectionState[activeDragCanvasId].startX);
+          if (dragDistance >= 2 && !pointerDownState.didDrag) {
+            pointerDownState.didDrag = true;
+            clearPinnedReadout(activeDragCanvasId);
+          }
+        }
+        selectionState[activeDragCanvasId].currentX = clampedX;
+        computeSelectionStats(activeDragCanvasId);
+        hoverState.year = xToYear(clampedX, geom);
+        hoverState.dateStr = formatDateFromYear(hoverState.year);
+        hoverDateEl.textContent = hoverState.dateStr;
+        redrawHoverOverlays();
+      }
+
+      function handleWindowMouseUp() {
+        if (!activeDragCanvasId) return;
+        const canvasId = activeDragCanvasId;
+        const state = selectionState[canvasId];
+        const downState = pointerDownState && pointerDownState.canvasId === canvasId ? pointerDownState : null;
+        const clickX = downState ? downState.startX : state.currentX;
+        state.active = false;
+        if (state.startX === null || state.currentX === null || Math.abs(state.currentX - state.startX) < 2) {
+          clearSelection(canvasId);
+          if (downState && downState.hadSelection) {
+            clearPinnedReadout(canvasId);
+          } else if (pinnedReadoutState[canvasId] && pinnedReadoutState[canvasId].active) {
+            clearPinnedReadout(canvasId);
+          } else if (clickX !== null && clickX !== undefined) {
+            computePinnedReadout(canvasId, clickX);
+          }
+        } else {
+          clearPinnedReadout(canvasId);
+          computeSelectionStats(canvasId);
+        }
+        activeDragCanvasId = null;
+        pointerDownState = null;
+        syncSelectionHashFromState();
+        redrawHoverOverlays();
+      }
+
+      chartCanvas.addEventListener('mousemove', handleMouseMove);
+      chartCanvas.addEventListener('mouseleave', handleMouseLeave);
+      chartCanvas.addEventListener('mousedown', handleMouseDown);
+      diffCanvas.addEventListener('mousemove', handleMouseMove);
+      diffCanvas.addEventListener('mouseleave', handleMouseLeave);
+      diffCanvas.addEventListener('mousedown', handleMouseDown);
+      window.addEventListener('mousemove', handleWindowMouseMove);
+      window.addEventListener('mouseup', handleWindowMouseUp);
+    }
+
+    // Initialize hover line after page loads
+    window.addEventListener('load', () => {
+      setupHoverLine();
+    });
+  </script>
+</body>
+</html>

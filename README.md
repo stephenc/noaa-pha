@@ -25,6 +25,8 @@ The following changes have been made in order to get the source code to compile 
 * Added `src/test/resources/data/test-station-meta-v3.txt` as a copy of `build/test-station-meta-v3.txt` to get the tests to pass
 * Added a `.gitignore`
 * Added this `README.md` file
+* Added a Go-based viewer webapp (`src/go`, built as `bin/PHAview`) for interactive time-series and reference comparisons.
+  This viewer webapp was added in this reconstruction and was **not** part of NOAA's original `ghcnm.src.v4.03172025.tar` source release.
 * Added TOB adjustment pipeline (`TOBMain`, `TOBUtils`, `TOBTestUnits`) and supporting TOB property keys (`tob.*`).  
   The TOB pipeline was reconstructed by combining the documented fragments in the
   NOAA v4 source with the fully working v52i implementation. Where v4 logic was
@@ -39,6 +41,7 @@ Building this project requires the following tools installed on your system:
 *   `gfortran` (or a compatible Fortran compiler, adjust `FC` in Makefile if needed)
 *   `python3` (for dependency generation)
 *   `gawk` (runtime dependency for some scripts)
+*   `go` (Go 1.22+, for building the `PHAview` webapp)
 
 Alternatively, you can use Docker to build and run the project in a containerized environment (see Docker Usage section below).
 
@@ -55,7 +58,7 @@ This project uses `make` to manage the build process.
     ```bash
     make all
     ```
-    This will compile all Fortran 77 and Fortran 95 source files located in `src/f` and `src/f95` respectively.
+    This will compile all Fortran 77 and Fortran 95 source files located in `src/f` and `src/f95`, AWK wrappers from `src/awk`, and the Go viewer webapp (`bin/PHAview`) from `src/go`.
 3.  **Output:**
     *   Compiled object files (`*.o`, `*.mod`) will be placed in the `./obj/` directory.
     *   Final executables and executable scripts will be placed in the `./bin/` directory.
@@ -118,11 +121,21 @@ A `Dockerfile` is provided for building and running the project within a Docker 
 *   `src/f95`: Contains Fortran 95 source files (`.f95`).
 *   `src/incl`: Contains Fortran `INCLUDE` files (`.inc`).
 *   `src/awk`: Contains AWK scripts (`.awk`) that are made executable in the build process.
+*   `src/go`: Contains the added Go viewer webapp (UI + HTTP API). This directory was added in this reconstruction and was not included in the original NOAA source tarball.
 *   `src/test/resources/data`: Contains data files used for testing.
 *   `build/`: Contains test configuration files (`.properties`) and potentially test logs.
 *   `obj/`: Stores intermediate object (`.o`) and module (`.mod`) files (Git ignored).
 *   `bin/`: Stores final compiled executables and executable scripts (Git ignored).
 *   `deps.mk`: Auto-generated dependency file for Make (Git ignored).
+
+## Viewer Webapp (Added)
+
+An interactive viewer webapp has been added under `src/go` and is built to `bin/PHAview`.
+It supports visualizing station series, QC include/ignore toggles, and comparisons against one or two references.
+
+This webapp was not present in NOAA's original `ghcnm.src.v4.03172025.tar` tarball; it was added as part of this reconstructed repository.
+
+For usage details, see `src/go/README.md`.
 
 ## Inferred details
 
