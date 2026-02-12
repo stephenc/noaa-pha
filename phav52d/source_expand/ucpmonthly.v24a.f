@@ -747,7 +747,7 @@ c     Open Candidate stations meta file to process
       print *,'  minser = ', minser
       print *,'  minann = ', minann
       print *,'  minlenshf = ', minlenshf
-      print *,'  slpmthmax = ', slpmthmax
+      write(6,'("  slpmthmax = ",f12.10)') slpmthmax
       print *,'  minlen = ', minlen
       print *,'  mincomp = ', mincomp
       print *,'  compt = ', compt
@@ -3041,6 +3041,8 @@ c      ----- NPASS includes the "Not sig" step as of v21 (18dec06) ----------
 
       character*13 tstr
 
+      ifound = 0
+      iexact = 0
       numrem = 0
       NLOOP = 99
       

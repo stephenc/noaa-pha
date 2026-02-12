@@ -43,7 +43,7 @@ else
   exit  
 endif
   
-set compat = "-std=legacy -fallow-argument-mismatch -ffixed-line-length-none"
+set compat = "-std=legacy -fallow-argument-mismatch -ffixed-line-length-none -fno-sign-zero"
 
 $fc ucpmonthly.v24a.for splitmerge.v21f.for chgptmodels.v6b.for \
   SHAPinp.v6c.for read_write.mthly.v5a.for acovf.for lmbic.for \

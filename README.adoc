@@ -30,14 +30,24 @@ The image compiles:
 
 `phav52d/documentation/readme.compiles` (distance/correlation/fillin helper utilities) is not run in Docker build because those legacy sources require a `g77`-compatible compiler.
 
-Run the benchmark (bind-mount output so logs are persisted locally):
+Run the benchmark in an isolated run directory (so reference files are not overwritten):
 
 [source,shell]
 ----
-$ docker run --rm -ti \
-  -v "$(pwd)/data/benchmark/case7/output:/home/cwilliam/data/benchmark/case7/output" \
-  noaa-pha:v52d \
-  sh -c 'export USHCNBASE=$HOME && ./phav52d/scripts/combo_runs/case7_bench.sh UCPM24aM21fC6bL1Si6cR5aH1'
+$ RUN_DIR="data/benchmark/case7-run-$(date +%Y%m%d%H%M%S)" && \
+  mkdir -p "$RUN_DIR/monthly" "$RUN_DIR/output" && \
+  cp -a data/benchmark/case7/corr "$RUN_DIR/" && \
+  cp -a data/benchmark/case7/monthly/raw "$RUN_DIR/monthly/" && \
+  docker run --rm -ti \
+    -v "$(pwd)/$RUN_DIR:/home/cwilliam/data/benchmark/case7" \
+    noaa-pha:v52d \
+    sh -c 'export USHCNBASE=$HOME && ./phav52d/scripts/combo_runs/case7_bench.sh UCPM24aM21fC6bL1Si6cR5aH1'
 ----
 
-Benchmark logs are written to `data/benchmark/case7/output/case7_bench.<timestamp>.log`.
+Compare generated outputs to the checked-in reference:
+
+[source,shell]
+----
+$ diff -ru data/benchmark/case7/monthly/WMs.52d "$RUN_DIR/monthly/WMs.52d"
+$ diff -u -w -B data/benchmark/case7/output/case7_bench.00_09.log "$RUN_DIR"/output/case7_bench.*.log
+----

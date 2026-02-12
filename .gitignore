@@ -2,3 +2,5 @@ bin/
 data/realworld/
 data-*/
 data/benchmark/case7/output/case7_bench.*.log
+data/benchmark/case7-run-*
+phav52d/source_expand/*.for

@@ -571,7 +571,7 @@ c         year/month of sig changepoint (beg-end of span)
           istnpt(nsig) = inhstns(ichg)
           if(asigx(nsig) .gt. 10. .or. asigx(nsig) .lt. -10.) then
             print *, subnet(1),'-',subnet(2),' BIG ASIGX: ', 
-     *        asigx(nsig),azscr(nsig),beg1,end1,beg2,end2
+     *        asigx(nsig),azscr(nsig),end1,beg2
           endif  
 
           if(idebug .ge. 1) then
