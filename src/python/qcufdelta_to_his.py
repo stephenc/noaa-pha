@@ -79,18 +79,10 @@ class MshrRecord:
     station_id: str
     begin_date: dt.date
     end_date: dt.date
-    source: int
-    lat_deg: float
-    lat_min: float
-    lat_sec: float
-    lon_deg: float
-    lon_min: float
-    lon_sec: float
-    distance_and_direction: str
-    elevation: int
-    instr_height: str
-    station_instr: List[str]
-    relocation: str
+    lat: Optional[float]    # LAT_DEC decimal degrees; None if missing
+    lon: Optional[float]    # LON_DEC decimal degrees; None if missing
+    elev_ft: Optional[int]  # ELEV_GROUND ground elevation in feet; None if missing
+    relocation: str         # RELOCATION field (62 chars); non-blank = station moved at begin_date
 
 
 @dataclass
@@ -274,22 +266,37 @@ def read_mshr_records(zip_path: Path, station_ids: Set[str]) -> Dict[str, List[M
                 if begin_date is None or end_date is None:
                     continue
 
+                # MSHR Enhanced Table columns (1-indexed in spec, 0-indexed here):
+                #   LAT_DEC      1300-1319  → [1299:1319]
+                #   LON_DEC      1321-1340  → [1320:1340]
+                #   ELEV_GROUND   990-1029  → [ 989:1029]  (in feet)
+                #   RELOCATION   1353-1414  → [1352:1414]
+                try:
+                    lat_raw = line[1299:1319].strip()
+                    lat = float(lat_raw) if lat_raw else None
+                except ValueError:
+                    lat = None
+                try:
+                    lon_raw = line[1320:1340].strip()
+                    lon = float(lon_raw) if lon_raw else None
+                except ValueError:
+                    lon = None
+                try:
+                    elev_raw = line[989:1029].strip()
+                    elev_ft = int(round(float(elev_raw))) if elev_raw else None
+                except ValueError:
+                    elev_ft = None
+
+                relocation = line[1352:1414]
+
                 rec = MshrRecord(
                     station_id=station_id,
                     begin_date=begin_date,
                     end_date=end_date,
-                    source=2,
-                    lat_deg=0.0,
-                    lat_min=0.0,
-                    lat_sec=0.0,
-                    lon_deg=0.0,
-                    lon_min=0.0,
-                    lon_sec=0.0,
-                    distance_and_direction="           ",
-                    elevation=0,
-                    instr_height="    ",
-                    station_instr=[],
-                    relocation=""
+                    lat=lat,
+                    lon=lon,
+                    elev_ft=elev_ft,
+                    relocation=relocation,
                 )
                 records[station_id].append(rec)
 
@@ -2263,7 +2270,9 @@ def write_his_file(station_id: str, segments: List[TobSegment],
                   verbose: bool = False):
     """Write final .his file for a station.
 
-    Only includes segments with include_in_his=True (TOB-related boundaries).
+    Includes segments with include_in_his=True (TOB-related boundaries), with
+    MSHR record begin dates inserted as additional split points so that every
+    MSHR entry produces at least one output row.  Rows are always contiguous.
     """
 
     his_path = out_dir / f"{station_id}.his"
@@ -2271,25 +2280,123 @@ def write_his_file(station_id: str, segments: List[TobSegment],
     # Filter segments to include only TOB-related boundaries
     his_segments = [seg for seg in segments if seg.include_in_his]
 
-    with open(his_path, 'w') as f:
-        for seg in his_segments:
-            start_y, start_m = from_absolute_month(seg.start_month)
+    # --- Step 1: compute the actual begin/end date for each his_segment -------
+    # Non-last segments extend to the day before the next segment starts so that
+    # rows are contiguous even when include_in_his=False segments sit between them.
+    seg_ranges = []  # (begin_date, end_date, tob_code)
+    for i, seg in enumerate(his_segments):
+        start_y, start_m = from_absolute_month(seg.start_month)
+        start_day = seg.start_day if seg.start_day is not None else 1
+        begin_date = dt.date(start_y, start_m, start_day)
+
+        if i < len(his_segments) - 1:
+            next_seg = his_segments[i + 1]
+            next_start_y, next_start_m = from_absolute_month(next_seg.start_month)
+            next_start_day = next_seg.start_day if next_seg.start_day is not None else 1
+            end_date = dt.date(next_start_y, next_start_m, next_start_day) - dt.timedelta(days=1)
+        else:
             end_y, end_m = from_absolute_month(seg.end_month)
-
-            lat_deg, lat_min, lat_sec = decimal_to_dms(inv_entry.lat)
-            lon_deg, lon_min, lon_sec = decimal_to_dms(inv_entry.lon)
-            elev = int(round(inv_entry.elev))
-
-            # Use start_day if specified, otherwise day 1
-            start_day = seg.start_day if seg.start_day is not None else 1
-            begin_date = dt.date(start_y, start_m, start_day)
-
-            # Use end_day if specified, otherwise actual last day of month
             if seg.end_day is not None:
                 end_day = seg.end_day
             else:
                 _, end_day = calendar.monthrange(end_y, end_m)
             end_date = dt.date(end_y, end_m, end_day)
+
+        seg_ranges.append((begin_date, end_date, seg.tob_code))
+
+    # --- Step 2: build output rows, inserting MSHR boundaries ----------------
+    # Each row is (begin_date, tob_code).
+    #
+    # For each his_segment we add the segment's own begin_date, then any MSHR
+    # begin_date that falls strictly within that segment's range.
+    #
+    # MSHR records that begin before the first his_segment are NOT added as
+    # explicit split points, but they ARE implicitly covered: the very first row
+    # starts at first_seg_begin, which effectively trims the pre-data portion of
+    # any MSHR that was active at that point.  The next MSHR's begin_date (which
+    # falls within the segment range) is added explicitly, so the transition is
+    # still captured.  MSHR records whose end_date is also before first_seg_begin
+    # are irrelevant and correctly receive no row at all.
+    #
+    # MSHR records that begin after the last his_segment end are added as
+    # trailing rows using the final TOB code and using the MSHR's own end_date
+    # for the very last row.
+    last_seg_end = seg_ranges[-1][1] if seg_ranges else None
+    last_tob_code = seg_ranges[-1][2] if seg_ranges else TOB_NO_BIAS_CODE
+
+    rows: List[Tuple[dt.date, str]] = []
+    for seg_begin, seg_end, tob_code in seg_ranges:
+        rows.append((seg_begin, tob_code))
+        for mshr in mshr_records:
+            if seg_begin < mshr.begin_date <= seg_end:
+                rows.append((mshr.begin_date, tob_code))
+
+    # Trailing MSHR records: begin after the last his_segment ends.
+    trailing_mshr: List[MshrRecord] = []
+    if last_seg_end is not None:
+        trailing_mshr = sorted(
+            [mshr for mshr in mshr_records if mshr.begin_date > last_seg_end],
+            key=lambda m: m.begin_date
+        )
+    for mshr in trailing_mshr:
+        rows.append((mshr.begin_date, last_tob_code))
+
+    # Sort and deduplicate (a TOB boundary and an MSHR boundary may coincide)
+    rows.sort(key=lambda x: x[0])
+    seen: Set[dt.date] = set()
+    deduped: List[Tuple[dt.date, str]] = []
+    for begin_date, tob_code in rows:
+        if begin_date not in seen:
+            seen.add(begin_date)
+            deduped.append((begin_date, tob_code))
+    rows = deduped
+
+    # The overall end date: trailing MSHR records extend beyond the data range,
+    # so use the last trailing MSHR's own end_date; otherwise the last his_segment's end.
+    last_end_date = trailing_mshr[-1].end_date if trailing_mshr else last_seg_end
+
+    # --- Step 3: write rows ---------------------------------------------------
+    # Build a lookup from begin_date → MshrRecord for O(1) boundary checks.
+    mshr_by_date: Dict[dt.date, MshrRecord] = {m.begin_date: m for m in mshr_records}
+
+    # Inventory elevation converted to feet as a fallback (MSHR uses feet).
+    inv_elev_ft = int(round(inv_entry.elev * 3.28084))
+
+    def _active_mshr(date: dt.date) -> Optional[MshrRecord]:
+        """Return the MSHR record with the latest begin_date <= date, or None."""
+        result = None
+        for m in mshr_records:  # sorted by begin_date
+            if m.begin_date <= date:
+                result = m
+            else:
+                break
+        return result
+
+    with open(his_path, 'w') as f:
+        for i, (begin_date, tob_code) in enumerate(rows):
+            if i < len(rows) - 1:
+                end_date = rows[i + 1][0] - dt.timedelta(days=1)
+            else:
+                end_date = last_end_date
+
+            # Lat/lon/elev from the MSHR record active at this date; fall back
+            # to the inventory entry if MSHR data is absent.
+            active = _active_mshr(begin_date)
+            if active and active.lat is not None and active.lon is not None:
+                lat_deg, lat_min, lat_sec = decimal_to_dms(active.lat)
+                lon_deg, lon_min, lon_sec = decimal_to_dms(active.lon)
+            else:
+                lat_deg, lat_min, lat_sec = decimal_to_dms(inv_entry.lat)
+                lon_deg, lon_min, lon_sec = decimal_to_dms(inv_entry.lon)
+            elev = active.elev_ft if (active and active.elev_ft is not None) else inv_elev_ft
+
+            # Relocation: non-blank only when an MSHR boundary starts exactly
+            # here and that MSHR record documents a relocation.
+            boundary = mshr_by_date.get(begin_date)
+            if boundary and boundary.relocation.strip():
+                dist_dir = boundary.relocation[:11].ljust(11)
+            else:
+                dist_dir = ' ' * 11
 
             line = (
                 f"2"
@@ -2298,16 +2405,17 @@ def write_his_file(station_id: str, segments: List[TobSegment],
                 f" {end_date.year:4d}{end_date.month:02d}{end_date.day:02d}"
                 f" {lat_deg:3.0f}{lat_min:3.0f}{lat_sec:3.0f}"
                 f" {lon_deg:4.0f}{lon_min:3.0f}{lon_sec:3.0f}"
-                f" {' ' * 11}"
+                f" {dist_dir}"
                 f" {elev:5d}"
                 f"  {' ' * 4}"
-                f" {seg.tob_code:4s}"
+                f" {tob_code:4s}"
                 f"     {' ' * 66}"
             )
             f.write(line + "\n")
 
     if verbose:
-        log(f"  Wrote {his_path} ({len(his_segments)} segments)")
+        log(f"  Wrote {his_path} ({len(rows)} rows, {len(his_segments)} TOB segments, "
+            f"{len(mshr_records)} MSHR records)")
 
 
 # ==============================================================================
