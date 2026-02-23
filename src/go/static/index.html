@@ -68,10 +68,25 @@
     <div id="chartStack" class="canvas-stack">
       <canvas id="chart" class="plot-canvas" width="900" height="300"></canvas>
       <canvas id="chartHover" class="hover-canvas" width="900" height="300"></canvas>
+      <div id="xZoomRow" style="position:absolute; bottom:10px; left:58px; right:20px; display:flex; justify-content:space-between; align-items:center; pointer-events:none; z-index:1; font-size:11px; color:#444;">
+        <span style="pointer-events:auto;">
+          <input type="number" id="xZoomFrom" placeholder="From" style="width:60px; font-size:11px; background:rgba(255,255,255,0.85); border:1px solid #aaa; padding:1px 3px;">
+        </span>
+        <span style="display:flex; align-items:center; gap:3px; pointer-events:auto;">
+          <input type="number" id="xZoomTo" placeholder="To" style="width:60px; font-size:11px; background:rgba(255,255,255,0.85); border:1px solid #aaa; padding:1px 3px;">
+          <button id="xZoomReset" style="font-size:11px; padding:1px 6px; background:rgba(255,255,255,0.85); border:1px solid #aaa; cursor:pointer;">&#x2715;</button>
+        </span>
+      </div>
+      <div id="chartZoomToSel" style="position:absolute; bottom:10px; left:0; right:0; display:none; justify-content:center; align-items:center; pointer-events:none; z-index:1;">
+        <button style="font-size:11px; padding:1px 6px; background:rgba(255,255,255,0.85); border:1px solid #aaa; cursor:pointer; pointer-events:auto;">Zoom to sel</button>
+      </div>
     </div>
     <div id="diffStack" class="canvas-stack">
       <canvas id="diff" class="plot-canvas" width="900" height="300"></canvas>
       <canvas id="diffHover" class="hover-canvas" width="900" height="300"></canvas>
+      <div id="diffZoomToSel" style="position:absolute; bottom:10px; left:0; right:0; display:none; justify-content:center; align-items:center; pointer-events:none; z-index:1;">
+        <button style="font-size:11px; padding:1px 6px; background:rgba(255,255,255,0.85); border:1px solid #aaa; cursor:pointer; pointer-events:auto;">Zoom to sel</button>
+      </div>
     </div>
     <div id="chartLoading" class="overlay"><div class="spinner"></div></div>
   </div>
@@ -100,6 +115,9 @@
       <button class="btn active" id="scopeAll" data-scope="all">All</button>
       <button class="btn" id="scopeSelection" data-scope="selection">Selection</button>
     </div>
+    <div class="btn-group" id="historyToggleGroup" style="display:none;">
+      <button class="btn active" id="historyToggleBtn">History</button>
+    </div>
   </div>
   <div class="row" style="position: relative;">
     <input id="stationFilter" placeholder="Filter stations..." />
@@ -117,6 +135,7 @@
   <script>
     const HAS_REF = __HAS_REF__;
     const HAS_REF2 = __HAS_REF2__;
+    const HAS_HIS = __HAS_HIS__;
     let currentView = {mode: 'overall', compare: true, compareMode: 'ref1', stationIds: [], scope: 'all'};
     let pendingStationIds = null;
     let suppressHistory = false;
@@ -132,6 +151,11 @@
       right2: document.getElementById('legendRight2Text').textContent
     };
     const plotPointCache = { chart: [], diff: [] };
+    let currentHistoryData = null;
+    let showHistoryLines = true;
+    const hisFetchCache = new Map();
+    let xZoom = {from: null, to: null};
+    let lastDrawn = null;
     const selectionState = {
       chart: { active: false, startX: null, currentX: null, stats: null },
       diff: { active: false, startX: null, currentX: null, stats: null }
@@ -271,6 +295,13 @@
       selectionState[canvasId].startX = null;
       selectionState[canvasId].currentX = null;
       selectionState[canvasId].stats = null;
+      updateZoomToSelButton();
+    }
+    function updateZoomToSelButton() {
+      const chartEl = document.getElementById('chartZoomToSel');
+      const diffEl = document.getElementById('diffZoomToSel');
+      if (chartEl) chartEl.style.display = selectionState.chart.stats ? 'flex' : 'none';
+      if (diffEl) diffEl.style.display = selectionState.diff.stats ? 'flex' : 'none';
     }
 
     function clearPinnedReadout(canvasId) {
@@ -434,10 +465,13 @@
         return;
       }
       state.stats = {
+        startYear,
+        endYear,
         startLabel: formatDateFromYear(startYear),
         endLabel: formatDateFromYear(endYear),
         items: statsItems
       };
+      updateZoomToSelButton();
     }
 
     function drawSelectionOverlay(baseCanvasId, ctx, geom) {
@@ -863,6 +897,8 @@
         lastStationIds = stationIds.slice();
       }
       if (stationIds.length > 0) params.set('station_id', stationIds.join(','));
+      if (xZoom.from !== null) params.set('zoom_from', xZoom.from);
+      if (xZoom.to !== null) params.set('zoom_to', xZoom.to);
       const url = `${location.pathname}?${params.toString()}${location.hash || ''}`;
       if (push) history.pushState(null, '', url); else history.replaceState(null, '', url);
     }
@@ -906,6 +942,12 @@
       if (stationParam) {
         scope = 'station';
       }
+      const zoomFrom = params.get('zoom_from');
+      const zoomTo = params.get('zoom_to');
+      xZoom.from = zoomFrom !== null ? parseFloat(zoomFrom) : null;
+      xZoom.to = zoomTo !== null ? parseFloat(zoomTo) : null;
+      document.getElementById('xZoomFrom').value = xZoom.from !== null ? xZoom.from : '';
+      document.getElementById('xZoomTo').value = xZoom.to !== null ? xZoom.to : '';
       const storedFilter = sessionStorage.getItem(STORAGE_FILTER) || '';
       const storedSort = sessionStorage.getItem(STORAGE_SORT) || 'id';
 
@@ -950,7 +992,100 @@
       if (document.getElementById('granCount').classList.contains('active')) return 'count';
       return 'yearly';
     }
-    function drawSeries(canvasId, seriesList, yLabel) {
+    async function fetchHisData(stationId) {
+      if (hisFetchCache.has(stationId)) return hisFetchCache.get(stationId);
+      try {
+        const res = await fetch(`/api/his?station_id=${stationId}`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!Array.isArray(data) || data.length === 0) return null;
+        hisFetchCache.set(stationId, data);
+        return data;
+      } catch {
+        return null;
+      }
+    }
+    function updateHistoryToggleVisibility() {
+      const group = document.getElementById('historyToggleGroup');
+      if (group) group.style.display = (HAS_HIS && currentHistoryData) ? '' : 'none';
+    }
+    function drawHistoryLines(canvasId, entries) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas || canvas.dataset.hasSeries !== '1') return;
+      const ctx = canvas.getContext('2d');
+      const padLeft  = parseFloat(canvas.dataset.padLeft);
+      const padTop   = parseFloat(canvas.dataset.padTop);
+      const padRight = parseFloat(canvas.dataset.padRight);
+      const h = canvas.height - padTop - parseFloat(canvas.dataset.padBottom);
+      const w = canvas.width  - padLeft - padRight;
+      const axisMin  = parseFloat(canvas.dataset.axisMin);
+      const axisMax  = parseFloat(canvas.dataset.axisMax);
+      const denom    = (axisMax - axisMin) || 1;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(padLeft, padTop, w, h);
+      ctx.clip();
+      ctx.lineWidth = 1;
+      for (const entry of entries) {
+        const x = padLeft + ((entry.year - axisMin) / denom) * w;
+        if (entry.tob_change) {
+          ctx.strokeStyle = 'rgba(200, 40, 40, 0.65)';
+          ctx.setLineDash([6, 4]);
+        } else {
+          ctx.strokeStyle = 'rgba(100, 100, 100, 0.45)';
+          ctx.setLineDash([2, 3]);
+        }
+        ctx.beginPath();
+        ctx.moveTo(x, padTop);
+        ctx.lineTo(x, padTop + h);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+      ctx.save();
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = 'rgba(200, 40, 40, 0.85)';
+      ctx.textAlign = 'center';
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        if (!entry.tob_change) continue;
+        let x = padLeft + ((entry.year - axisMin) / denom) * w;
+        // Always show the initial TOB code at the left edge even if the .his
+        // starts before the visible data range.
+        if (i === 0) x = Math.max(x, padLeft);
+        if (x < padLeft || x > padLeft + w) continue;
+        ctx.fillText(entry.tob_code, x, padTop - 4);
+      }
+      ctx.restore();
+    }
+    function drawHistoryOverlay() {
+      if (!currentHistoryData || !showHistoryLines) return;
+      drawHistoryLines('chart', currentHistoryData);
+      const diffStack = document.getElementById('diffStack');
+      if (diffStack && diffStack.style.display !== 'none') {
+        drawHistoryLines('diff', currentHistoryData);
+      }
+    }
+    async function updateCurrentHistoryData() {
+      const isSingleStation = HAS_HIS &&
+        currentView.scope === 'station' &&
+        currentView.stationIds.length === 1;
+      if (!isSingleStation) {
+        currentHistoryData = null;
+      } else {
+        currentHistoryData = await fetchHisData(currentView.stationIds[0]);
+      }
+      updateHistoryToggleVisibility();
+    }
+    document.getElementById('historyToggleBtn')?.addEventListener('click', function() {
+      showHistoryLines = !showHistoryLines;
+      this.classList.toggle('active', showHistoryLines);
+      if (lastDrawn) {
+        drawBoth(lastDrawn.chart, lastDrawn.diff, lastDrawn.chartYLabel, lastDrawn.diffYLabel);
+        drawHistoryOverlay();
+      }
+    });
+    function drawSeries(canvasId, seriesList, yLabel, xRange = null) {
       const canvas = document.getElementById(canvasId);
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -968,8 +1103,16 @@
       if (!seriesList || seriesList.length === 0) return;
       const allPoints = seriesList.flatMap(s => s.points);
       if (allPoints.length === 0) return;
+      const yearVals = allPoints.map(p => parseYearFraction(p.t)).filter(y => y !== null);
+      const axisMin = xRange ? xRange.min : (yearVals.length > 0 ? Math.min(...yearVals) : 0);
+      const axisMax = xRange ? xRange.max : (yearVals.length > 0 ? Math.max(...yearVals) : 1);
+      const visibleYs = allPoints
+        .map(p => ({ year: parseYearFraction(p.t), v: p.v }))
+        .filter(p => p.year !== null && Number.isFinite(p.v) && p.year >= axisMin && p.year <= axisMax)
+        .map(p => p.v);
+      const ys = visibleYs.length > 0 ? visibleYs : allPoints.map(p => p.v).filter(Number.isFinite);
+      if (ys.length === 0) return;
       const isDiffCanvas = canvasId === 'diff';
-      const ys = allPoints.map(p => p.v);
       const minY = Math.min(...ys);
       const maxY = Math.max(...ys);
       const yDomainMin = isDiffCanvas ? Math.min(minY, 0) : minY;
@@ -1027,7 +1170,7 @@
       }
 
       // X labels (30-year ticks)
-      const yearVals = allPoints.map(p => parseYearFraction(p.t)).filter(y => y !== null);
+      const denom = (axisMax - axisMin) || 1;
       plotPointCache[canvasId] = seriesList.map((series, idx) => {
         const resolvedColor = series.color || DEFAULT_SERIES_COLORS[idx] || '#333';
         return {
@@ -1035,16 +1178,12 @@
           color: resolvedColor,
           points: series.points
             .map(p => ({ year: parseYearFraction(p.t), v: p.v }))
-            .filter(p => p.year !== null && Number.isFinite(p.v))
+            .filter(p => p.year !== null && Number.isFinite(p.v) && p.year >= axisMin && p.year <= axisMax)
         };
       }).filter(series => series.points.length > 0);
-      const years = yearVals.map(y => Math.floor(y));
-      if (years.length > 0) {
-        const axisMin = Math.min(...yearVals);
-        const axisMax = Math.max(...yearVals);
+      {
         const minYear = Math.floor(axisMin);
         const maxYear = Math.ceil(axisMax);
-        const denom = (axisMax - axisMin) || 1;
         const anchor = 1700;
         const offset = Math.ceil((axisMin - anchor) / 30) * 30;
         const startTick = anchor + offset;
@@ -1057,30 +1196,58 @@
           ctx.fillText(String(y), x - 12, pad.top + h + 16);
         }
       }
+      // Clip series drawing to the plot area so data outside the x-range is cut at the axis
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(pad.left, pad.top, w, h);
+      ctx.clip();
       seriesList.forEach((series, idx) => {
-        // Use custom color if specified, otherwise use default palette
-        ctx.strokeStyle = series.color || DEFAULT_SERIES_COLORS[idx] || '#333';
-        ctx.beginPath();
-        series.points.forEach((p, i) => {
+        const color = series.color || DEFAULT_SERIES_COLORS[idx] || '#333';
+
+        // Resolve (x, y, yr) for each point once
+        const pts = series.points.map(p => {
           const yr = parseYearFraction(p.t);
-          const axisMin = Math.min(...yearVals);
-          const axisMax = Math.max(...yearVals);
-          const denom = (axisMax - axisMin) || 1;
-          const t = yr === null ? i / (series.points.length - 1 || 1) : (yr - axisMin) / denom;
-          const x = pad.left + t * w;
-          const y = yToPx(p.v);
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
+          if (yr === null) return null;
+          return { x: pad.left + ((yr - axisMin) / denom) * w, y: yToPx(p.v), yr };
+        }).filter(p => p !== null);
+
+        if (pts.length === 0) return;
+
+        // Gap threshold: 1.5× the minimum inter-point step in the series
+        let minStep = Infinity;
+        for (let i = 1; i < pts.length; i++) {
+          const step = pts[i].yr - pts[i - 1].yr;
+          if (step > 0 && step < minStep) minStep = step;
+        }
+        const gapThreshold = minStep === Infinity ? Infinity : minStep * 1.5;
+
+        // Draw lines, breaking at gaps
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) {
+          const isGap = i > 0 && (pts[i].yr - pts[i - 1].yr) > gapThreshold;
+          if (i === 0 || isGap) ctx.moveTo(pts[i].x, pts[i].y);
+          else ctx.lineTo(pts[i].x, pts[i].y);
+        }
         ctx.stroke();
+
+        // Draw a filled circle at each data point
+        ctx.fillStyle = color;
+        for (const pt of pts) {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 2, 0, 2 * Math.PI);
+          ctx.fill();
+        }
       });
+      ctx.restore();
 
       // Store axis info for hover calculation
       canvas.dataset.padLeft = pad.left;
       canvas.dataset.padRight = pad.right;
       canvas.dataset.padTop = pad.top;
       canvas.dataset.padBottom = pad.bottom;
-      canvas.dataset.axisMin = yearVals.length > 0 ? Math.min(...yearVals) : 0;
-      canvas.dataset.axisMax = yearVals.length > 0 ? Math.max(...yearVals) : 1;
+      canvas.dataset.axisMin = axisMin;
+      canvas.dataset.axisMax = axisMax;
       canvas.dataset.hasSeries = '1';
 
       applySelectionFromHash(canvasId);
@@ -1175,13 +1342,17 @@
       const chart = document.getElementById('chart');
       const diff = document.getElementById('diff');
       const diffStack = document.getElementById('diffStack');
+      const chartStack = document.getElementById('chartStack');
+      const zoomRow = document.getElementById('xZoomRow');
       if (compare) {
         chart.height = 300;
         diffStack.style.display = 'block';
         diff.height = 300;
+        diffStack.appendChild(zoomRow);
       } else {
         chart.height = 600;
         diffStack.style.display = 'none';
+        chartStack.appendChild(zoomRow);
       }
       updateLegend(compare, compareMode);
       syncHoverCanvasSize('chart', 'chartHover');
@@ -1226,6 +1397,34 @@
         }
         loading.style.display = 'none';
         throw err;
+      }
+    }
+    function computeSharedXRange(allSeries) {
+      const yearVals = allSeries
+        .flatMap(s => s.points || [])
+        .map(p => parseYearFraction(p.t))
+        .filter(y => y !== null);
+      if (yearVals.length === 0) return null;
+      let minY = Math.min(...yearVals);
+      let maxY = Math.max(...yearVals);
+      if (xZoom.from !== null) minY = Math.max(minY, xZoom.from);
+      if (xZoom.to !== null) maxY = Math.min(maxY, xZoom.to);
+      if (minY > maxY) return null;
+      return {min: minY, max: maxY};
+    }
+    function drawBoth(chartSeries, diffSeries, chartYLabel, diffYLabel) {
+      lastDrawn = {chart: chartSeries, diff: diffSeries, chartYLabel, diffYLabel};
+      const allSeries = [...(chartSeries || []), ...(diffSeries || [])];
+      const sharedRange = computeSharedXRange(allSeries);
+      drawSeries('chart', chartSeries, chartYLabel, sharedRange);
+      if (diffSeries && diffSeries.length > 0) {
+        drawSeries('diff', diffSeries, diffYLabel, sharedRange);
+      }
+    }
+    function redrawBoth() {
+      if (lastDrawn) {
+        drawBoth(lastDrawn.chart, lastDrawn.diff, lastDrawn.chartYLabel, lastDrawn.diffYLabel);
+        drawHistoryOverlay();
       }
     }
     async function loadSeries(mode, compare, compareMode) {
@@ -1274,8 +1473,9 @@
           diffSeries.push({label: 'dir-ref2', points: ref2Data.diff, color: '#2ca02c'});
         }
 
-        drawSeries('chart', combinedSeries, chartYLabel);
-        drawSeries('diff', diffSeries, diffYLabel);
+        drawBoth(combinedSeries, diffSeries, chartYLabel, diffYLabel);
+        await updateCurrentHistoryData();
+        drawHistoryOverlay();
 
       } else {
         const useCompare = compare || (HAS_REF && !compare);
@@ -1302,10 +1502,9 @@
         const diffLabel = activeRef === 'ref2' ? 'dir-ref2' : 'dir-ref1';
         const diffSeries = compare && data.diff ? [{label: diffLabel, points: data.diff, color: diffColor}] : [];
 
-        drawSeries('chart', series, chartYLabel);
-        if (compare) {
-          drawSeries('diff', diffSeries, diffYLabel);
-        }
+        drawBoth(series, compare ? diffSeries : [], chartYLabel, diffYLabel);
+        await updateCurrentHistoryData();
+        drawHistoryOverlay();
         if (HAS_REF) {
           fetchSeries(mode, true, compareMode).catch(() => {});
         }
@@ -1542,6 +1741,9 @@
       updateStationCount();
       document.getElementById('scopeSelection').classList.add('active');
       document.getElementById('scopeAll').classList.remove('active');
+      xZoom = {from: null, to: null};
+      document.getElementById('xZoomFrom').value = '';
+      document.getElementById('xZoomTo').value = '';
       refreshFromControls();
     });
 
@@ -1704,6 +1906,37 @@
     // Initialize hover line after page loads
     window.addEventListener('load', () => {
       setupHoverLine();
+    });
+    function applyZoomFromStats(stats) {
+      xZoom.from = Math.floor(stats.startYear);
+      xZoom.to = Math.floor(stats.endYear) + 1;
+      document.getElementById('xZoomFrom').value = xZoom.from;
+      document.getElementById('xZoomTo').value = xZoom.to;
+      updateURLFromUI(false);
+      redrawBoth();
+    }
+    document.getElementById('chartZoomToSel').querySelector('button').addEventListener('click', function() {
+      if (selectionState.chart.stats) applyZoomFromStats(selectionState.chart.stats);
+    });
+    document.getElementById('diffZoomToSel').querySelector('button').addEventListener('click', function() {
+      if (selectionState.diff.stats) applyZoomFromStats(selectionState.diff.stats);
+    });
+    document.getElementById('xZoomFrom').addEventListener('change', function() {
+      xZoom.from = this.value !== '' ? parseFloat(this.value) : null;
+      updateURLFromUI(false);
+      redrawBoth();
+    });
+    document.getElementById('xZoomTo').addEventListener('change', function() {
+      xZoom.to = this.value !== '' ? parseFloat(this.value) : null;
+      updateURLFromUI(false);
+      redrawBoth();
+    });
+    document.getElementById('xZoomReset').addEventListener('click', function() {
+      xZoom = {from: null, to: null};
+      document.getElementById('xZoomFrom').value = '';
+      document.getElementById('xZoomTo').value = '';
+      updateURLFromUI(false);
+      redrawBoth();
     });
   </script>
 </body>

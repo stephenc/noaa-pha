@@ -164,6 +164,7 @@ fi
 VIEWER_DIR="${DATA_DIR}/output/adj/tavg"
 VIEWER_REF="${DATA_DIR}/output/qcf/tavg"
 VIEWER_REF2="${DATA_DIR}/input/tob/tavg"
+VIEWER_HIS="${DATA_DIR}/input/history"
 VIEWER_INV="${DATA_DIR}/input/station.inv"
 
 echo "Launching viewer at http://${VIEWER_HOST}:${VIEWER_PORT}/"
@@ -171,6 +172,7 @@ exec bin/PHAview \
   --dir "${VIEWER_DIR}" \
   --ref "${VIEWER_REF}" \
   --ref2 "${VIEWER_REF2}" \
+  --history "${VIEWER_HIS}" \
   --inventory "${VIEWER_INV}" \
   --host "${VIEWER_HOST}" \
   --port "${VIEWER_PORT}"

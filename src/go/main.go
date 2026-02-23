@@ -50,18 +50,27 @@ type StationRow struct {
 	Diffs  []*float64 `json:"diffs"`
 }
 
+type HisEntry struct {
+	Year      float64 `json:"year"`
+	TobChange bool    `json:"tob_change"`
+	TobCode   string  `json:"tob_code"`
+}
+
 type ViewerApp struct {
 	leftDir    string
 	rightDir   string
 	right2Dir  string
+	historyDir string
 	leftMap    map[string]string
 	rightMap   map[string]string
 	right2Map  map[string]string
+	historyMap map[string]string
 	inv        map[string]InventoryEntry
-	leftHash   string
-	rightHash  string
-	right2Hash string
-	invHash    string
+	leftHash    string
+	rightHash   string
+	right2Hash  string
+	invHash     string
+	historyHash string
 
 	cacheMu sync.Mutex
 	cache   map[string]any
@@ -265,6 +274,77 @@ func parseInventory(path string) map[string]InventoryEntry {
 		}
 	}
 	return inv
+}
+
+func parseHisFile(path string) []HisEntry {
+	fh, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer fh.Close()
+
+	type rawRow struct {
+		year, month, day int
+		tobCode          string
+	}
+	var rows []rawRow
+
+	scanner := bufio.NewScanner(fh)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) == 0 || line[0] != '2' {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		// Determine which field holds the begin-date (8 digits).
+		// Our generated format has no station-ID token, so fields[1] is the
+		// date.  Some original NOAA files include a station-ID token so the
+		// date may be at fields[2].
+		dateIdx := 1
+		if len(fields[1]) != 8 {
+			dateIdx = 2
+		}
+		if dateIdx >= len(fields) || len(fields[dateIdx]) != 8 {
+			continue
+		}
+		ds := fields[dateIdx]
+		year, err1 := strconv.Atoi(ds[0:4])
+		month, err2 := strconv.Atoi(ds[4:6])
+		day, err3 := strconv.Atoi(ds[6:8])
+		if err1 != nil || err2 != nil || err3 != nil {
+			continue
+		}
+		tobCode := fields[len(fields)-1]
+		rows = append(rows, rawRow{year, month, day, tobCode})
+	}
+	if scanner.Err() != nil || len(rows) < 2 {
+		return nil
+	}
+
+	yearFracFor := func(r rawRow) float64 {
+		t := time.Date(r.year, time.Month(r.month), r.day, 0, 0, 0, 0, time.UTC)
+		yStart := time.Date(r.year, 1, 1, 0, 0, 0, 0, time.UTC)
+		yEnd := time.Date(r.year+1, 1, 1, 0, 0, 0, 0, time.UTC)
+		return float64(r.year) + t.Sub(yStart).Hours()/yEnd.Sub(yStart).Hours()
+	}
+	entries := make([]HisEntry, 0, len(rows))
+	// Always include the first row so the initial TOB code label is shown.
+	entries = append(entries, HisEntry{
+		Year:      yearFracFor(rows[0]),
+		TobChange: true,
+		TobCode:   rows[0].tobCode,
+	})
+	for i := 1; i < len(rows); i++ {
+		entries = append(entries, HisEntry{
+			Year:      yearFracFor(rows[i]),
+			TobChange: rows[i].tobCode != rows[i-1].tobCode,
+			TobCode:   rows[i].tobCode,
+		})
+	}
+	return entries
 }
 
 func gridID(lat float64, lon float64) int {
@@ -1081,14 +1161,16 @@ func countBreakpoints(leftPath string, rightPath string, includeQC bool) int {
 	return count
 }
 
-func NewViewerApp(leftDir string, rightDir string, right2Dir string, inventory string, templatePath string) (*ViewerApp, error) {
+func NewViewerApp(leftDir, rightDir, right2Dir, historyDir, inventory, templatePath string) (*ViewerApp, error) {
 	app := &ViewerApp{
 		leftDir:     leftDir,
 		rightDir:    rightDir,
 		right2Dir:   right2Dir,
+		historyDir:  historyDir,
 		leftMap:     listStationFiles(leftDir),
 		rightMap:    map[string]string{},
 		right2Map:   map[string]string{},
+		historyMap:  map[string]string{},
 		inv:         map[string]InventoryEntry{},
 		cache:       make(map[string]any),
 		seriesCache: make(map[string]any),
@@ -1099,12 +1181,16 @@ func NewViewerApp(leftDir string, rightDir string, right2Dir string, inventory s
 	if right2Dir != "" {
 		app.right2Map = listStationFiles(right2Dir)
 	}
+	if historyDir != "" {
+		app.historyMap = listStationFiles(historyDir)
+	}
 	if inventory != "" {
 		app.inv = parseInventory(inventory)
 	}
 	app.leftHash = hashDirState(leftDir)
 	app.rightHash = hashDirState(rightDir)
 	app.right2Hash = hashDirState(right2Dir)
+	app.historyHash = hashDirState(historyDir)
 	app.invHash = hashFileState(inventory)
 
 	tmpl, err := os.ReadFile(templatePath)
@@ -1115,6 +1201,24 @@ func NewViewerApp(leftDir string, rightDir string, right2Dir string, inventory s
 
 	go app.precomputeSeries()
 	return app, nil
+}
+
+func (app *ViewerApp) getHisData(stationID string) []HisEntry {
+	app.cacheMu.Lock()
+	defer app.cacheMu.Unlock()
+	key := "his:" + stationID
+	if cached, ok := app.cache[key]; ok {
+		if v, ok2 := cached.([]HisEntry); ok2 {
+			return v
+		}
+	}
+	path, ok := app.historyMap[stationID]
+	if !ok {
+		return nil
+	}
+	entries := parseHisFile(path)
+	app.cache[key] = entries
+	return entries
 }
 
 func (app *ViewerApp) seriesCacheKey(mode string, includeQC bool, granularity string, compare bool) string {
@@ -1593,14 +1697,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/":
 		hasRef := "false"
 		hasRef2 := "false"
+		hasHis := "false"
 		if h.app.rightDir != "" {
 			hasRef = "true"
 		}
 		if h.app.right2Dir != "" {
 			hasRef2 = "true"
 		}
+		if h.app.historyDir != "" {
+			hasHis = "true"
+		}
 		body := strings.ReplaceAll(h.app.template, "__HAS_REF__", hasRef)
 		body = strings.ReplaceAll(body, "__HAS_REF2__", hasRef2)
+		body = strings.ReplaceAll(body, "__HAS_HIS__", hasHis)
 		body = strings.ReplaceAll(body, "__LEFT_LABEL__", htmlEscape(h.app.leftDir))
 		body = strings.ReplaceAll(body, "__RIGHT_LABEL__", htmlEscape(h.app.rightDir))
 		body = strings.ReplaceAll(body, "__RIGHT2_LABEL__", htmlEscape(h.app.right2Dir))
@@ -1668,6 +1777,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		h.sendJSON(w, r, h.app.series(mode, includeQC, granularity, stationID, compare, refNum), etag)
 		return
+	case "/api/his":
+		stationID := r.URL.Query().Get("station_id")
+		if stationID == "" || h.app.historyDir == "" {
+			h.sendJSON(w, r, []HisEntry{}, "")
+			return
+		}
+		params := struct {
+			StationID   string `json:"station_id"`
+			HistoryHash string `json:"history_hash"`
+		}{StationID: stationID, HistoryHash: h.app.historyHash}
+		etag := h.etagFor("his", params)
+		if h.maybe304(w, r, etag) {
+			return
+		}
+		entries := h.app.getHisData(stationID)
+		if entries == nil {
+			entries = []HisEntry{}
+		}
+		h.sendJSON(w, r, entries, etag)
+		return
 	case "/api/station":
 		stationID := r.URL.Query().Get("id")
 		includeQC := r.URL.Query().Get("include_qc") == "1"
@@ -1705,6 +1834,7 @@ func main() {
 		dir       string
 		ref       string
 		ref2      string
+		history   string
 		inventory string
 		host      string
 		port      int
@@ -1712,6 +1842,7 @@ func main() {
 	flag.StringVar(&dir, "dir", "", "Primary data directory")
 	flag.StringVar(&ref, "ref", "", "Reference data directory")
 	flag.StringVar(&ref2, "ref2", "", "Second reference data directory")
+	flag.StringVar(&history, "history", "", "History (.his) file directory")
 	flag.StringVar(&inventory, "inventory", "", "Station inventory file")
 	flag.StringVar(&host, "host", "127.0.0.1", "Host to bind")
 	flag.IntVar(&port, "port", 8080, "Port to bind")
@@ -1726,7 +1857,7 @@ func main() {
 		templatePath = filepath.Join("src", "go", "static", "index.html")
 	}
 
-	app, err := NewViewerApp(dir, ref, ref2, inventory, templatePath)
+	app, err := NewViewerApp(dir, ref, ref2, history, inventory, templatePath)
 	if err != nil {
 		log.Fatalf("failed to start viewer: %v", err)
 	}
