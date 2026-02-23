@@ -4,12 +4,15 @@
 This implements the forward scanning algorithm:
 - Phase 1: Basis vector generation
 - Phase 2: Forward scanning with gap handling (≥12 months)
-- Phase 2.5: Boundary refinement (backtrack to find actual shift point)
-- Phase 2.6: Boundary timing validation (adjust ±3 months for perfect fit)
-- Phase 2.7: Pathological segmentation fix (merge segments < 12 months, use best variance)
-- Phase 3: Code selection with tie-breaking (fewest values → longest runs → common codes)
-- Phase 4: Walk-back for TOB+PHA cases (gap ≥18 months between segments)
-- Phase 5: Merge same-code segments (with MSHR awareness)
+- Phase 3: Boundary timing validation (adjust ±6 months for perfect fit)
+- Phase 3b: Back-attribute trailing months at A→B boundary to B's regime
+- Phase 4: Spike boundary refinement (day-level transition detection)
+- Phase 4b: Multi-month edge anomaly healing at A→B boundaries
+- Phase 5: Pathological segmentation detection and repair
+- Phase 6: Short bridge segment recoding to enable merging
+- Phase 7: Cross-gap TOB attribution (PHA-continuity test)
+- Phase 8: Merge same-code segments (with MSHR awareness)
+- Phase 8.5: Trim anomalous leading months from first segment (24HR prefix)
 - Validation: Perfect fit + variance check
 
 See qcufdelta_to_his.md for detailed theory.
@@ -170,6 +173,20 @@ def count_distinct_values_integer(residuals: List[float]) -> int:
     return len(set(residual_cents))
 
 
+def _active_mshr_at(date: dt.date, mshr_records: List['MshrRecord']) -> Optional['MshrRecord']:
+    """Return the MSHR record with the latest begin_date <= date, or None.
+
+    Assumes mshr_records is sorted ascending by begin_date.
+    """
+    result = None
+    for m in mshr_records:
+        if m.begin_date <= date:
+            result = m
+        else:
+            break
+    return result
+
+
 # ==============================================================================
 # File parsing (copied from v2)
 # ==============================================================================
@@ -308,7 +325,7 @@ def read_mshr_records(zip_path: Path, station_ids: Set[str]) -> Dict[str, List[M
 
 
 # ==============================================================================
-# Phase 0: Quick Filter (copied from v2)
+# Data Preparation
 # ==============================================================================
 
 def compute_residuals(qcu_data: Dict[Tuple[int, int], int],
@@ -344,7 +361,7 @@ def needs_tob_reconstruction(residuals: Dict[Tuple[int, int], float]) -> bool:
 
 
 # ==============================================================================
-# Phase 1: Generate Basis Vectors (copied from v2)
+# Phase 1: Basis Vector Generation
 # ==============================================================================
 
 def generate_single_code_his(station_id: str, inv_entry: InventoryEntry,
@@ -374,8 +391,60 @@ def generate_single_code_his(station_id: str, inv_entry: InventoryEntry,
     return line
 
 
+def generate_mshr_aware_his(station_id: str, tob_code: str,
+                            record_start: Tuple[int, int], record_end: Tuple[int, int],
+                            mshr_records: List[MshrRecord],
+                            inv_entry: InventoryEntry) -> str:
+    """Generate a .his with a single TOB code but MSHR-derived lat/lon per period.
+
+    Creates one row per MSHR location period within the record range so that
+    TOBMain (run with tob.use-his-lat-lon=true) uses the correct lat/lon for
+    each sub-period when computing the expected adjustment.
+    """
+    begin_data = dt.date(record_start[0], record_start[1], 1)
+    end_data = dt.date(record_end[0], record_end[1], 28)
+    inv_elev_ft = int(round(inv_entry.elev * 3.28084))
+
+    # Collect period start-dates: record start plus any MSHR begin_date within record
+    boundaries: List[dt.date] = [begin_data]
+    for mshr in mshr_records:
+        if begin_data < mshr.begin_date <= end_data:
+            boundaries.append(mshr.begin_date)
+    boundaries.sort()
+
+    lines = []
+    for i, bdate in enumerate(boundaries):
+        edate = boundaries[i + 1] - dt.timedelta(days=1) if i < len(boundaries) - 1 else end_data
+
+        active = _active_mshr_at(bdate, mshr_records)
+        if active and active.lat is not None and active.lon is not None:
+            lat_deg, lat_min, lat_sec = decimal_to_dms(active.lat)
+            lon_deg, lon_min, lon_sec = decimal_to_dms(active.lon)
+        else:
+            lat_deg, lat_min, lat_sec = decimal_to_dms(inv_entry.lat)
+            lon_deg, lon_min, lon_sec = decimal_to_dms(inv_entry.lon)
+        elev = active.elev_ft if (active and active.elev_ft is not None) else inv_elev_ft
+
+        lines.append(
+            f"2"
+            f"{' ' * 12}"
+            f" {bdate.year:4d}{bdate.month:02d}{bdate.day:02d}"
+            f" {edate.year:4d}{edate.month:02d}{edate.day:02d}"
+            f" {lat_deg:3.0f}{lat_min:3.0f}{lat_sec:3.0f}"
+            f" {lon_deg:4.0f}{lon_min:3.0f}{lon_sec:3.0f}"
+            f" {' ' * 11}"
+            f" {elev:5d}"
+            f"  {' ' * 4}"
+            f" {tob_code:4s}"
+            f"     {' ' * 66}"
+        )
+    return "\n".join(lines)
+
+
 def run_tobmain(tob_bin: Path, station_id: str, qcu_file: Path, his_file: Path,
-               work_dir: Path, inv_entry: InventoryEntry, verbose: bool = False,
+               work_dir: Path, inv_entry: InventoryEntry,
+               use_mshr_lat_lon: bool = False,
+               verbose: bool = False,
                debug_dir: Optional[Path] = None) -> Optional[Dict[Tuple[int, int], int]]:
     """Run TOBMain with given .his file and return adjusted data."""
     raw_dir = work_dir / "raw" / "tavg"
@@ -392,6 +461,7 @@ def run_tobmain(tob_bin: Path, station_id: str, qcu_file: Path, his_file: Path,
     with open(inv_file, 'w') as f:
         f.write(f"{station_id:11s} {inv_entry.lat:8.4f}  {inv_entry.lon:9.4f}  {inv_entry.elev:6.1f} \n")
 
+    use_his_lat_lon_str = "true" if use_mshr_lat_lon else "false"
     props_file = work_dir / "tob.properties"
     with open(props_file, 'w') as f:
         f.write(f"""pha.element = tavg
@@ -400,6 +470,7 @@ pha.path.station-history = {hist_dir}/
 
 tob.start-year = 1700
 tob.start-from-history = true
+tob.use-his-lat-lon = {use_his_lat_lon_str}
 tob.input-data-type = raw
 tob.backfill-if-first-nonblank = false
 tob.pause-on-blank-after-nonblank = false
@@ -446,9 +517,17 @@ def generate_basis_vectors(station_id: str, inv_entry: InventoryEntry,
                           qcu_data: Dict[Tuple[int, int], int],
                           residuals: Dict[Tuple[int, int], float],
                           tob_bin: Path, qcu_file: Path,
+                          mshr_records: List[MshrRecord],
+                          use_mshr_lat_lon: bool = False,
                           verbose: bool = False,
                           debug_dir: Optional[Path] = None) -> Dict[str, Dict[Tuple[int, int], float]]:
-    """Generate basis vectors for all TOB codes."""
+    """Generate basis vectors for all TOB codes.
+
+    Each synthetic .his encodes the MSHR location history (when use_mshr_lat_lon
+    is True) so that TOBMain computes the expected adjustment using the correct
+    lat/lon for each sub-period.  Falls back to the inventory lat/lon for
+    periods with no MSHR record or missing coordinates.
+    """
 
     if not residuals:
         return {}
@@ -490,10 +569,17 @@ def generate_basis_vectors(station_id: str, inv_entry: InventoryEntry,
         for i, code in enumerate(ALL_TOB_CODES):
             fake_id = f"{station_id[:9]}{code_to_index[code]}"
 
-            # Create .his file with this TOB code
-            his_content = generate_single_code_his(
-                fake_id, inv_entry, code, record_start, record_end
-            )
+            # Create .his file with this TOB code.
+            # With MSHR lat/lon: multi-period .his so TOBMain uses per-location adjustments.
+            # Without: single-period .his with the inventory lat/lon.
+            if use_mshr_lat_lon:
+                his_content = generate_mshr_aware_his(
+                    fake_id, code, record_start, record_end, mshr_records, inv_entry
+                )
+            else:
+                his_content = generate_single_code_his(
+                    fake_id, inv_entry, code, record_start, record_end
+                )
             his_file = hist_dir / f"{fake_id}.his"
             with open(his_file, 'w') as f:
                 f.write(his_content + "\n")
@@ -512,6 +598,7 @@ def generate_basis_vectors(station_id: str, inv_entry: InventoryEntry,
                     # Fallback if hardlinks not supported
                     shutil.copy(qcu_file, raw_file)
 
+        use_his_lat_lon_str = "true" if use_mshr_lat_lon else "false"
         # Run TOBMain ONCE for all 30 synthetic stations
         props_file = work_dir / "tob.properties"
         with open(props_file, 'w') as f:
@@ -521,6 +608,7 @@ pha.path.station-history = {hist_dir}/
 
 tob.start-year = 1700
 tob.start-from-history = true
+tob.use-his-lat-lon = {use_his_lat_lon_str}
 tob.input-data-type = raw
 tob.backfill-if-first-nonblank = false
 tob.pause-on-blank-after-nonblank = false
@@ -579,7 +667,7 @@ tob.logger.rollover-datestamp = false
 
 
 # ==============================================================================
-# Phase 2.5: Boundary Refinement
+# Boundary Refinement Helpers
 # ==============================================================================
 
 def refine_boundary(segment_start: int, detected_boundary: int,
@@ -663,9 +751,11 @@ def validate_boundary_timing(segments: List[TobSegment],
     """Validate and adjust boundary timing to achieve perfect fit on both sides.
 
     After forward scan creates segments, check each boundary to see if adjusting
-    it ±1-3 months would result in both adjacent segments having perfect fit
+    it ±1-6 months would result in both adjacent segments having perfect fit
     (≤3 distinct values). This corrects for cases where the boundary refinement
-    didn't find the exact transition month.
+    didn't find the exact transition month — in particular when a missing data
+    month immediately before the true transition causes the forward scan to land
+    several months late.
 
     Special case: If both segments use the same code after adjustment, this is
     likely a PHA-only step (not a TOB change), so mark as exclude from .his.
@@ -689,21 +779,33 @@ def validate_boundary_timing(segments: List[TobSegment],
             seg.start_month, seg.end_month
         )
 
-        # Try adjusting boundary ±1, ±2, ±3 months to minimize total distinct values
+        # Try adjusting boundary ±1–6 months to minimize total distinct values.
         # Even if both segments have "perfect fit" (≤3 distinct), we should prefer
-        # fewer total distinct values (e.g., 1+3=4 is better than 3+3=6)
+        # fewer total distinct values (e.g., 1+3=4 is better than 3+3=6).
+        # ±6 is needed because a data gap (missing month) immediately before the
+        # true transition can cause the forward scan to land several months late.
         best_boundary = seg.start_month
         best_prev_distinct = prev_distinct
         best_curr_distinct = curr_distinct
         best_total = prev_distinct + curr_distinct
 
-        for shift in [-3, -2, -1, 1, 2, 3]:
+        # Iterate in order of increasing absolute magnitude so that, when two
+        # shifts produce identical total distinct counts, the smaller (closer to
+        # zero) shift is preferred.  Larger shifts still win when they strictly
+        # reduce the total (e.g. a missing-data month forces a 5-month correction).
+        for shift in [-1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6]:
             new_boundary = seg.start_month + shift
 
-            # Must leave at least MIN_SEGMENT_MONTHS in each segment
-            if new_boundary <= prev_seg.start_month + MIN_SEGMENT_MONTHS:
+            # Must leave enough months in each segment after the shift.
+            # For short segments (e.g. the first post-gap window), scale the
+            # minimum down so that boundary shifts are not completely blocked.
+            prev_span = prev_seg.end_month - prev_seg.start_month
+            curr_span = seg.end_month - seg.start_month
+            prev_min = min(MIN_SEGMENT_MONTHS, max(2, prev_span // 2))
+            curr_min = min(MIN_SEGMENT_MONTHS, max(2, curr_span // 2))
+            if new_boundary <= prev_seg.start_month + prev_min:
                 continue
-            if new_boundary >= seg.end_month - MIN_SEGMENT_MONTHS:
+            if new_boundary >= seg.end_month - curr_min:
                 continue
 
             # Count distinct values with adjusted boundary
@@ -719,7 +821,11 @@ def validate_boundary_timing(segments: List[TobSegment],
 
             # Accept adjustment if:
             # 1. Both segments achieve perfect fit, OR
-            # 2. Total distinct values decreases
+            # 2. Total distinct values decreases, OR
+            # 3. Total is tied but the old (prev) segment becomes cleaner.
+            #    A cleaner old segment means the established regime ends at a
+            #    well-defined point.  This also allows Phase 4 to trigger on
+            #    partial-month transitions that sit in the new segment.
             if (new_prev_distinct <= 3 and new_curr_distinct <= 3 and
                 not (best_prev_distinct <= 3 and best_curr_distinct <= 3)):
                 # Achieved perfect fit on both sides
@@ -729,6 +835,12 @@ def validate_boundary_timing(segments: List[TobSegment],
                 best_total = new_total
             elif new_total < best_total:
                 # Improved total fit quality
+                best_boundary = new_boundary
+                best_prev_distinct = new_prev_distinct
+                best_curr_distinct = new_curr_distinct
+                best_total = new_total
+            elif new_total == best_total and new_prev_distinct < best_prev_distinct:
+                # Tied total but old segment is cleaner
                 best_boundary = new_boundary
                 best_prev_distinct = new_prev_distinct
                 best_curr_distinct = new_curr_distinct
@@ -782,6 +894,135 @@ def validate_boundary_timing(segments: List[TobSegment],
     return validated
 
 
+def back_attribute_trailing_months(
+        segments: List[TobSegment],
+        residuals: Dict[Tuple[int, int], float],
+        basis_vectors: Dict[str, Dict[Tuple[int, int], float]],
+        verbose: bool = False) -> List[TobSegment]:
+    """Phase 3b: Move trailing months from segment A to B at each A→B boundary.
+
+    When the last few months of segment A have adjusted residuals (R - S_B) that
+    already belong to segment B's stable value set, those months are operating at
+    B's TOB regime even though the forward scan placed them in A.  Shift the
+    boundary earlier by moving those months into B.
+
+    This corrects cases where NOAA's PHA step lands a few months before the
+    boundary detected by the forward scan, causing a short run at A's end to
+    have B-level residuals.
+
+    Conditions to move the last k months of A to B:
+      - All k months have adj_B (R - S_B) values already in B's adj set.
+      - Removing those k months keeps A's distinct count ≤ 3.
+      - At least MIN_SEGMENT_MONTHS data months remain in A.
+    """
+    if len(segments) <= 1:
+        return segments
+
+    MAX_BACK = 6
+
+    result = list(segments)
+
+    for i in range(1, len(result)):
+        prev = result[i - 1]
+        curr = result[i]
+
+        if not prev.include_in_his or not curr.include_in_his:
+            continue
+        if prev.tob_code == curr.tob_code:
+            continue
+        if prev.tob_code not in basis_vectors or curr.tob_code not in basis_vectors:
+            continue
+
+        basis_prev = basis_vectors[prev.tob_code]
+        basis_curr = basis_vectors[curr.tob_code]
+
+        # All data months in prev segment (sorted ascending)
+        all_prev_months = sorted(
+            to_absolute_month(y, m) for (y, m) in residuals
+            if prev.start_month <= to_absolute_month(y, m) <= prev.end_month
+            and (y, m) in basis_prev
+        )
+        if len(all_prev_months) <= MIN_SEGMENT_MONTHS:
+            continue
+
+        # B's (curr segment) stable adj value set.
+        # Use only months at offset ≥7 from B's start so that any anomalous
+        # leading months of B (e.g. a partial transition month) don't pollute
+        # the set and cause spurious back-attribution of A's tail months.
+        B_adj_set = set()
+        for (y, m) in residuals:
+            am = to_absolute_month(y, m)
+            if am - curr.start_month >= 7 and am <= curr.end_month and (y, m) in basis_curr:
+                B_adj_set.add(int(round((residuals[(y, m)] - basis_curr[(y, m)]) * 100)))
+        if not B_adj_set:
+            continue
+
+        # Walk backward through A's tail months
+        max_k = min(MAX_BACK, len(all_prev_months) - MIN_SEGMENT_MONTHS)
+        if max_k <= 0:
+            continue
+
+        best_k = 0
+        for k in range(1, max_k + 1):
+            tail_am = all_prev_months[-k]
+            ty, tm = from_absolute_month(tail_am)
+
+            if (ty, tm) not in basis_curr:
+                break  # Can't compute adj_B for this month
+
+            adj_B = int(round((residuals[(ty, tm)] - basis_curr[(ty, tm)]) * 100))
+            if adj_B not in B_adj_set:
+                break  # Month doesn't match B's stable level
+
+            # Check remaining A data (all months strictly before tail_am)
+            remaining = [am for am in all_prev_months if am < tail_am]
+            if len(remaining) < MIN_SEGMENT_MONTHS:
+                break
+
+            A_remaining_adj = set()
+            for ram in remaining:
+                ry, rm = from_absolute_month(ram)
+                A_remaining_adj.add(
+                    int(round((residuals[(ry, rm)] - basis_prev[(ry, rm)]) * 100))
+                )
+            if len(A_remaining_adj) <= 3:
+                best_k = k
+
+        if best_k > 0:
+            tail_am = all_prev_months[-best_k]
+            new_prev_end = tail_am - 1  # A ends one calendar month before first moved month
+
+            if verbose:
+                old_b_y, old_b_m = from_absolute_month(curr.start_month)
+                new_b_y, new_b_m = from_absolute_month(tail_am)
+                log(f"  Back-attributed {best_k} months: "
+                    f"{prev.tob_code}→{curr.tob_code} boundary "
+                    f"{old_b_y}-{old_b_m:02d} → {new_b_y}-{new_b_m:02d}")
+
+            result[i - 1] = TobSegment(
+                start_month=prev.start_month,
+                end_month=new_prev_end,
+                tob_code=prev.tob_code,
+                variance_score=prev.variance_score,
+                data_count=prev.data_count,
+                include_in_his=prev.include_in_his,
+                start_day=prev.start_day,
+                end_day=prev.end_day,
+            )
+            result[i] = TobSegment(
+                start_month=tail_am,
+                end_month=curr.end_month,
+                tob_code=curr.tob_code,
+                variance_score=curr.variance_score,
+                data_count=curr.data_count,
+                include_in_his=curr.include_in_his,
+                start_day=curr.start_day,
+                end_day=curr.end_day,
+            )
+
+    return result
+
+
 def refine_spike_boundaries(segments: List[TobSegment],
                             residuals: Dict[Tuple[int, int], float],
                             basis_vectors: Dict[str, Dict[Tuple[int, int], float]],
@@ -813,6 +1054,121 @@ def refine_spike_boundaries(segments: List[TobSegment],
             refined.append(seg)
             continue
 
+        TOLERANCE = 0.01
+
+        # ---- BACKWARD SPIKE CHECK ----
+        # Check if the LAST month of the previous segment is the true transition
+        # month (i.e. the regime change happened mid-month within prev_seg.end_month
+        # rather than at the start of seg.start_month).
+        back_y, back_m = from_absolute_month(prev_seg.end_month)
+        if ((back_y, back_m) in residuals
+                and (back_y, back_m) in basis_vectors.get(prev_seg.tob_code, {})
+                and (back_y, back_m) in basis_vectors.get(seg.tob_code, {})):
+            back_residual = residuals[(back_y, back_m)]
+            diff_prev_b = back_residual - basis_vectors[prev_seg.tob_code][(back_y, back_m)]
+            diff_curr_b = back_residual - basis_vectors[seg.tob_code][(back_y, back_m)]
+
+            ref_month_b = prev_seg.end_month
+            prev_diffs_b = []
+            curr_diffs_b = []
+            for offset in range(-6, 7):
+                if offset == 0:
+                    continue
+                cm_b = ref_month_b + offset
+                cy_b, cmm_b = from_absolute_month(cm_b)
+                if (cy_b, cmm_b) in residuals:
+                    if offset < 0 and (cy_b, cmm_b) in basis_vectors.get(prev_seg.tob_code, {}):
+                        prev_diffs_b.append(
+                            residuals[(cy_b, cmm_b)] - basis_vectors[prev_seg.tob_code][(cy_b, cmm_b)]
+                        )
+                    if offset > 0 and (cy_b, cmm_b) in basis_vectors.get(seg.tob_code, {}):
+                        curr_diffs_b.append(
+                            residuals[(cy_b, cmm_b)] - basis_vectors[seg.tob_code][(cy_b, cmm_b)]
+                        )
+
+            if prev_diffs_b and curr_diffs_b:
+                prev_min_b, prev_max_b = min(prev_diffs_b), max(prev_diffs_b)
+                curr_min_b, curr_max_b = min(curr_diffs_b), max(curr_diffs_b)
+                prev_out_b = (diff_prev_b < prev_min_b - TOLERANCE
+                              or diff_prev_b > prev_max_b + TOLERANCE)
+                curr_out_b = (diff_curr_b < curr_min_b - TOLERANCE
+                              or diff_curr_b > curr_max_b + TOLERANCE)
+
+                if prev_out_b and curr_out_b:
+                    _, days_b = calendar.monthrange(back_y, back_m)
+                    midpoint_b = (prev_min_b + prev_max_b + curr_min_b + curr_max_b) / 4.0
+                    best_day_b = None
+                    best_distinct_b = float('inf')
+                    best_in_stable_b = False
+                    best_mid_b = float('inf')
+
+                    for split_day_b in range(2, days_b + 1):
+                        days_old = split_day_b - 1
+                        days_new = days_b - split_day_b + 1
+                        weighted_diff_b = (
+                            (days_old * diff_prev_b + days_new * diff_curr_b) / days_b
+                        )
+                        wc_b = int(round(weighted_diff_b * 100))
+                        nearby_b = {wc_b}
+                        for offset in range(-3, 4):
+                            if offset == 0:
+                                continue
+                            cm2_b = ref_month_b + offset
+                            cy2_b, cmm2_b = from_absolute_month(cm2_b)
+                            if (cy2_b, cmm2_b) in residuals:
+                                basis_b = (basis_vectors[seg.tob_code]
+                                           if offset > 0
+                                           else basis_vectors[prev_seg.tob_code])
+                                if (cy2_b, cmm2_b) in basis_b:
+                                    nd_b = (residuals[(cy2_b, cmm2_b)]
+                                            - basis_b[(cy2_b, cmm2_b)])
+                                    nearby_b.add(int(round(nd_b * 100)))
+                        dc_b = len(nearby_b)
+                        md_b = abs(weighted_diff_b - midpoint_b)
+                        in_stable_b = (
+                            prev_min_b - TOLERANCE <= weighted_diff_b <= prev_max_b + TOLERANCE or
+                            curr_min_b - TOLERANCE <= weighted_diff_b <= curr_max_b + TOLERANCE
+                        )
+                        if (dc_b < best_distinct_b or
+                                (dc_b == best_distinct_b and in_stable_b and not best_in_stable_b) or
+                                (dc_b == best_distinct_b and in_stable_b == best_in_stable_b
+                                 and md_b < best_mid_b)):
+                            best_distinct_b = dc_b
+                            best_in_stable_b = in_stable_b
+                            best_mid_b = md_b
+                            best_day_b = split_day_b
+
+                    if best_day_b is not None and best_day_b > 1:
+                        if verbose:
+                            log(f"  Refined backward spike at {back_y}-{back_m:02d} "
+                                f"split day {best_day_b} "
+                                f"(spike: {diff_prev_b:+.3f}/{diff_curr_b:+.3f}°C, "
+                                f"distinct: {best_distinct_b})")
+                        prev_seg_updated_b = TobSegment(
+                            start_month=prev_seg.start_month,
+                            end_month=prev_seg.end_month,
+                            tob_code=prev_seg.tob_code,
+                            variance_score=prev_seg.variance_score,
+                            data_count=prev_seg.data_count,
+                            include_in_his=prev_seg.include_in_his,
+                            start_day=prev_seg.start_day,
+                            end_day=best_day_b - 1,
+                        )
+                        refined[-1] = prev_seg_updated_b
+                        seg_updated_b = TobSegment(
+                            start_month=prev_seg.end_month,  # share the transition month
+                            end_month=seg.end_month,
+                            tob_code=seg.tob_code,
+                            variance_score=seg.variance_score,
+                            data_count=seg.data_count,
+                            include_in_his=seg.include_in_his,
+                            start_day=best_day_b,
+                            end_day=seg.end_day,
+                        )
+                        refined.append(seg_updated_b)
+                        continue  # backward fix applied; skip forward check
+
+        # ---- FORWARD SPIKE CHECK ----
         # Get the transition month (first month of current segment)
         transition_y, transition_m = from_absolute_month(seg.start_month)
 
@@ -833,7 +1189,11 @@ def refine_spike_boundaries(segments: List[TobSegment],
         diff_prev = transition_residual - basis_vectors[prev_seg.tob_code][(transition_y, transition_m)]
         diff_curr = transition_residual - basis_vectors[seg.tob_code][(transition_y, transition_m)]
 
-        # Get residual ranges from nearby months (±6 months)
+        # Get residual ranges from nearby months.
+        # Deliberately one-sided: prev_diffs from the OLD segment only (offset<0),
+        # curr_diffs from the NEW segment only (offset>0).  Using both sides for
+        # each code would contaminate the range with months where that code is no
+        # longer active, artificially widening the "in-bound" interval.
         prev_diffs = []
         curr_diffs = []
         for offset in range(-6, 7):
@@ -842,9 +1202,9 @@ def refine_spike_boundaries(segments: List[TobSegment],
             check_month = seg.start_month + offset
             check_y, check_m = from_absolute_month(check_month)
             if (check_y, check_m) in residuals:
-                if (check_y, check_m) in basis_vectors.get(prev_seg.tob_code, {}):
+                if offset < 0 and (check_y, check_m) in basis_vectors.get(prev_seg.tob_code, {}):
                     prev_diffs.append(residuals[(check_y, check_m)] - basis_vectors[prev_seg.tob_code][(check_y, check_m)])
-                if (check_y, check_m) in basis_vectors.get(seg.tob_code, {}):
+                if offset > 0 and (check_y, check_m) in basis_vectors.get(seg.tob_code, {}):
                     curr_diffs.append(residuals[(check_y, check_m)] - basis_vectors[seg.tob_code][(check_y, check_m)])
 
         if not prev_diffs or not curr_diffs:
@@ -856,20 +1216,34 @@ def refine_spike_boundaries(segments: List[TobSegment],
         curr_min, curr_max = min(curr_diffs), max(curr_diffs)
 
         # Out of bound check (±0.01°C tolerance)
-        TOLERANCE = 0.01
         prev_out_of_bound = (diff_prev < prev_min - TOLERANCE or diff_prev > prev_max + TOLERANCE)
         curr_out_of_bound = (diff_curr < curr_min - TOLERANCE or diff_curr > curr_max + TOLERANCE)
 
-        # Only refine if BOTH are out of bound (spike affects both codes)
-        if not (prev_out_of_bound and curr_out_of_bound):
+        # Require at least the new-code residual to be anomalous.
+        if not curr_out_of_bound:
             refined.append(seg)
             continue
+
+        # When only the new code is out of bound (prev is within its range), the seasonal
+        # spread of the old code may contain the transition month (e.g. winter vs summer
+        # months of the same old-code segment straddle the transition month's diff).
+        # Allow the split if the anomaly on the new code is large enough to be credible.
+        BOUNDARY_MONTH_MIN_ANOMALY = 0.05  # ≥ 5 centidegrees required for one-sided detection
+        if not prev_out_of_bound:
+            curr_anomaly = max(
+                diff_curr - (curr_max + TOLERANCE),
+                (curr_min - TOLERANCE) - diff_curr,
+            )
+            if curr_anomaly < BOUNDARY_MONTH_MIN_ANOMALY:
+                refined.append(seg)
+                continue
 
         # Search for optimal day split
         _, days_in_month = calendar.monthrange(transition_y, transition_m)
 
         best_day = None
         best_distinct_count = float('inf')
+        best_in_stable = False
         best_midpoint_distance = float('inf')
 
         midpoint = (prev_min + prev_max + curr_min + curr_max) / 4.0
@@ -899,10 +1273,20 @@ def refine_spike_boundaries(segments: List[TobSegment],
             distinct_count = len(nearby_cents)
             midpoint_distance = abs(weighted_diff - midpoint)
 
-            # Prefer 2 distinct values, then minimize midpoint distance
-            if distinct_count < best_distinct_count or \
-               (distinct_count == best_distinct_count and midpoint_distance < best_midpoint_distance):
+            # True if weighted blend falls within one of the two stable level ranges.
+            # Prefer these days: they assign the transition month cleanly to one level.
+            in_stable = (
+                prev_min - TOLERANCE <= weighted_diff <= prev_max + TOLERANCE or
+                curr_min - TOLERANCE <= weighted_diff <= curr_max + TOLERANCE
+            )
+
+            # Priority: fewest distinct values, then in stable range, then midpoint distance
+            if (distinct_count < best_distinct_count or
+                    (distinct_count == best_distinct_count and in_stable and not best_in_stable) or
+                    (distinct_count == best_distinct_count and in_stable == best_in_stable
+                     and midpoint_distance < best_midpoint_distance)):
                 best_distinct_count = distinct_count
+                best_in_stable = in_stable
                 best_midpoint_distance = midpoint_distance
                 best_day = split_day
 
@@ -943,8 +1327,153 @@ def refine_spike_boundaries(segments: List[TobSegment],
     return refined
 
 
+def heal_edge_transitions(
+        segments: List[TobSegment],
+        residuals: Dict[Tuple[int, int], float],
+        basis_vectors: Dict[str, Dict[Tuple[int, int], float]],
+        verbose: bool = False) -> List[TobSegment]:
+    """Phase 4b: Heal multi-month anomalies at code-changing boundaries.
+
+    At an A→B boundary the first few months of B sometimes show a residual
+    (R - S_B) outside the stable B range because NOAA's QCF placed those months
+    in the adjacent PHA step level.  When months 0..K-2 of B land on the stable
+    B adj under code A instead, we extend the A segment through those months and
+    day-split the last anomalous month (month K-1) at the day that brings its
+    blended adj into the stable B range.
+
+    Criterion: K ≤ MAX_EDGE anomalous leading months, each month 0..K-2 gives
+    adj_A in the stable B range, and a valid split day exists for month K-1.
+    """
+    MAX_EDGE = 4
+    TOLERANCE_CENTS = 1   # ±1 centidegree (= 0.01°C)
+    MIN_STABLE_MONTHS = 3
+
+    result = list(segments)
+    for i in range(1, len(result)):
+        prev = result[i - 1]
+        curr = result[i]
+        if not prev.include_in_his or not curr.include_in_his:
+            continue
+        if prev.tob_code == curr.tob_code:
+            continue
+        if prev.tob_code not in basis_vectors or curr.tob_code not in basis_vectors:
+            continue
+
+        basis_prev = basis_vectors[prev.tob_code]
+        basis_curr = basis_vectors[curr.tob_code]
+
+        # Stable B adj range: months at offsets +7..+18 from B-segment start
+        stable_adjs = []
+        for offset in range(7, 19):
+            am = curr.start_month + offset
+            if am > curr.end_month:
+                break
+            y, m = from_absolute_month(am)
+            if (y, m) in residuals and (y, m) in basis_curr:
+                stable_adjs.append(
+                    int(round((residuals[(y, m)] - basis_curr[(y, m)]) * 100))
+                )
+        if len(stable_adjs) < MIN_STABLE_MONTHS:
+            continue
+        stable_min = min(stable_adjs)
+        stable_max = max(stable_adjs)
+
+        def in_stable(adj_cents: int) -> bool:
+            return stable_min - TOLERANCE_CENTS <= adj_cents <= stable_max + TOLERANCE_CENTS
+
+        # Find anomalous leading months of B (adj_B outside stable range)
+        first_months: List[Tuple[int, int]] = []   # (abs_month, adj_B_cents)
+        for k in range(MAX_EDGE + 1):
+            am = curr.start_month + k
+            if am > curr.end_month:
+                break
+            y, m = from_absolute_month(am)
+            if (y, m) not in residuals or (y, m) not in basis_curr:
+                break
+            adj_B = int(round((residuals[(y, m)] - basis_curr[(y, m)]) * 100))
+            if not in_stable(adj_B):
+                first_months.append((am, adj_B))
+            else:
+                break
+
+        K = len(first_months)
+        # K=0: no anomaly.  K=1: already handled by Phase 4 spike refinement.
+        # K>MAX_EDGE: too many anomalous months, skip.
+        if K < 2 or K > MAX_EDGE:
+            continue
+
+        # Months 0..K-2 must land on the stable B adj under code A
+        ok = True
+        for k in range(K - 1):
+            am, _ = first_months[k]
+            y, m = from_absolute_month(am)
+            if (y, m) not in basis_prev:
+                ok = False
+                break
+            adj_A = int(round((residuals[(y, m)] - basis_prev[(y, m)]) * 100))
+            if not in_stable(adj_A):
+                ok = False
+                break
+        if not ok:
+            continue
+
+        # Find optimal split day within month K-1 (M_last)
+        m_last_am, _ = first_months[K - 1]
+        my, mm = from_absolute_month(m_last_am)
+        if (my, mm) not in residuals or (my, mm) not in basis_prev or (my, mm) not in basis_curr:
+            continue
+
+        R_last = residuals[(my, mm)]
+        S_A_last = basis_prev[(my, mm)]
+        S_B_last = basis_curr[(my, mm)]
+        diff_A = R_last - S_A_last   # adj under pure A (°C)
+        diff_B = R_last - S_B_last   # adj under pure B (°C)
+
+        _, days_in_month = calendar.monthrange(my, mm)
+        stable_center = (stable_min + stable_max) / 200.0  # °C
+
+        best_day = None
+        best_dist = float('inf')
+        for d in range(1, days_in_month + 1):
+            days_A = d - 1
+            days_B = days_in_month - d + 1
+            blended = (days_A * diff_A + days_B * diff_B) / days_in_month
+            adj_blended = int(round(blended * 100))
+            if in_stable(adj_blended):
+                dist = abs(blended - stable_center)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_day = d
+
+        if best_day is None or best_day == 1:
+            continue
+
+        if verbose:
+            old_by, old_bm = from_absolute_month(curr.start_month)
+            anomalous = [a for _, a in first_months]
+            log(f"  Healed {K}-month edge anomaly: {prev.tob_code}→{curr.tob_code} "
+                f"boundary moved from {old_by}-{old_bm:02d} "
+                f"to {my}-{mm:02d}-{best_day:02d} "
+                f"(stable [{stable_min},{stable_max}], anomalous adj: {anomalous})")
+
+        result[i - 1] = TobSegment(
+            start_month=prev.start_month, end_month=m_last_am,
+            tob_code=prev.tob_code, variance_score=prev.variance_score,
+            data_count=prev.data_count, include_in_his=prev.include_in_his,
+            start_day=prev.start_day, end_day=best_day - 1,
+        )
+        result[i] = TobSegment(
+            start_month=m_last_am, end_month=curr.end_month,
+            tob_code=curr.tob_code, variance_score=curr.variance_score,
+            data_count=curr.data_count, include_in_his=curr.include_in_his,
+            start_day=best_day, end_day=curr.end_day,
+        )
+
+    return result
+
+
 # ==============================================================================
-# Phase 3: Code Selection (Tie-Breaking)
+# Code Selection (Tie-Breaking)
 # ==============================================================================
 
 def choose_best_code(valid_codes: List[CandidateCode], previous_code: Optional[str]) -> str:
@@ -985,7 +1514,7 @@ def choose_best_code(valid_codes: List[CandidateCode], previous_code: Optional[s
 
 
 # ==============================================================================
-# Phase 4: Walk-Back for TOB+PHA Cases
+# Walk-Back for TOB+PHA Cases
 # ==============================================================================
 
 def is_tob_transition(residuals: Dict[Tuple[int, int], float],
@@ -1609,7 +2138,7 @@ def analyze_monthly_hour_pattern(
 
 
 # ==============================================================================
-# Phase 3: Pathological Case Detection and Variance Fallback
+# Phase 5: Pathological Segmentation Detection and Repair
 # ==============================================================================
 
 def detect_and_fix_pathological_segmentation(
@@ -1911,7 +2440,23 @@ def detect_and_fix_pathological_segmentation(
 
             final_regions.append(curr_region)
 
-        pathological_regions = final_regions
+        # Merge any overlapping final regions (can occur when two grown regions
+        # have consumed the same segment indices from different seed points).
+        merged_final = []
+        for region_indices in final_regions:
+            region_set = set(region_indices)
+            if not merged_final:
+                merged_final.append(sorted(region_set))
+                continue
+            # Regions are sorted by start index; overlap iff the new region's
+            # first index falls at or before the previous region's last index.
+            if region_indices[0] <= merged_final[-1][-1]:
+                merged_final[-1] = sorted(set(merged_final[-1]) | region_set)
+                if verbose:
+                    log(f"  Merged overlapping pathological regions")
+            else:
+                merged_final.append(sorted(region_set))
+        pathological_regions = merged_final
 
         # Process each pathological region independently to find best variance code
         pathological_replacements = {}  # Map region_indices tuple to merged segment
@@ -2030,7 +2575,7 @@ def detect_and_fix_pathological_segmentation(
 
 
 # ==============================================================================
-# Phase 4.5: Boundary Polishing
+# Boundary Polishing
 # ==============================================================================
 
 def polish_boundaries(segments: List[TobSegment],
@@ -2141,7 +2686,299 @@ def calculate_segment_variance(residuals: Dict[Tuple[int, int], float],
 
 
 # ==============================================================================
-# Phase 5: Merge Same-Code Segments
+# Phase 6: Short Bridge Segment Recoding
+# ==============================================================================
+
+def recode_short_segments(segments: List[TobSegment],
+                          residuals: Dict[Tuple[int, int], float],
+                          basis_vectors: Dict[str, Dict[Tuple[int, int], float]],
+                          verbose: bool = False) -> List[TobSegment]:
+    """Recode segments with fewer than MIN_SEGMENT_MONTHS data points.
+
+    A short "bridge" segment (e.g. 6-month 24HR between 07HR and 00SS) can arise
+    when the forward scan crosses a gap.  The segment may be assigned a code that
+    fits its few data points no better than either neighbour's code would.  If a
+    neighbour's code gives strictly fewer distinct values (or equal distinct values
+    but the neighbour's code is the same on both sides), re-assign this segment
+    to that code so that Phase 8 (merge_segments) will fold it away.
+
+    Only recodes include_in_his segments; excluded-from-his segments are left alone.
+    Only considers the codes of immediately adjacent segments as candidates.
+    """
+    if len(segments) <= 1:
+        return segments
+
+    result = list(segments)
+    changed = True
+    while changed:
+        changed = False
+        for i, seg in enumerate(result):
+            if not seg.include_in_his:
+                continue
+
+            # Use effective boundaries: clamp to adjacent segments' extents.
+            # Phase 5 can produce overlapping segments (a pathological region
+            # whose nominal end_month falls inside the next segment's range).
+            # The write_his_file output clips such segments at the next start,
+            # so we must assess the segment on its *effective* data window.
+            eff_start = seg.start_month
+            eff_end = seg.end_month
+            if i > 0 and result[i - 1].end_month >= eff_start:
+                eff_start = result[i - 1].end_month + 1
+            if i < len(result) - 1 and result[i + 1].start_month <= eff_end:
+                eff_end = result[i + 1].start_month - 1
+
+            if eff_start > eff_end:
+                continue  # fully subsumed — nothing to recode
+
+            # Count data points inside the effective window
+            eff_count = sum(
+                1 for (year, month) in residuals
+                if eff_start <= to_absolute_month(year, month) <= eff_end
+            )
+            if eff_count >= MIN_SEGMENT_MONTHS:
+                continue
+
+            # Gather candidate codes from adjacent segments
+            candidates = {}
+            if i > 0 and result[i - 1].include_in_his:
+                prev_code = result[i - 1].tob_code
+                if prev_code in basis_vectors:
+                    candidates[prev_code] = count_segment_distinct_values(
+                        residuals, basis_vectors[prev_code],
+                        eff_start, eff_end
+                    )
+            if i < len(result) - 1 and result[i + 1].include_in_his:
+                next_code = result[i + 1].tob_code
+                if next_code in basis_vectors:
+                    candidates[next_code] = count_segment_distinct_values(
+                        residuals, basis_vectors[next_code],
+                        eff_start, eff_end
+                    )
+
+            if not candidates:
+                continue
+
+            # Current distinct-value count with existing code
+            current_distinct = (
+                count_segment_distinct_values(
+                    residuals, basis_vectors[seg.tob_code],
+                    eff_start, eff_end
+                ) if seg.tob_code in basis_vectors else 999
+            )
+
+            # Pick the best candidate: fewest distinct values; break ties by
+            # preferring the code that appears on both sides (so both neighbours
+            # merge), then by preferring the previous-segment code.
+            best_code = None
+            best_distinct = current_distinct
+            both_sides_code = None
+            if (i > 0 and i < len(result) - 1
+                    and result[i - 1].include_in_his
+                    and result[i + 1].include_in_his
+                    and result[i - 1].tob_code == result[i + 1].tob_code):
+                both_sides_code = result[i - 1].tob_code
+
+            for code, distinct in candidates.items():
+                if distinct < best_distinct:
+                    best_code = code
+                    best_distinct = distinct
+                elif distinct == best_distinct and code == both_sides_code:
+                    best_code = code  # prefer code that appears on both sides
+
+            if best_code is not None and best_code != seg.tob_code:
+                if verbose:
+                    sy, sm = from_absolute_month(seg.start_month)
+                    ey, em = from_absolute_month(seg.end_month)
+                    log(f"  Recoding short segment {sy}-{sm:02d}–{ey}-{em:02d}: "
+                        f"{seg.tob_code} → {best_code} "
+                        f"(distinct {current_distinct} → {best_distinct})")
+                result[i] = TobSegment(
+                    start_month=seg.start_month,
+                    end_month=seg.end_month,
+                    tob_code=best_code,
+                    variance_score=seg.variance_score,
+                    include_in_his=seg.include_in_his,
+                    start_day=seg.start_day,
+                    end_day=seg.end_day
+                )
+                changed = True
+
+    return result
+
+
+# ==============================================================================
+# Phase 7: Cross-Gap TOB Attribution
+# ==============================================================================
+
+def cross_gap_attribution(
+    segments: List[TobSegment],
+    residuals: Dict[Tuple[int, int], float],
+    basis_vectors: Dict[str, Dict[Tuple[int, int], float]],
+    verbose: bool = False
+) -> List[TobSegment]:
+    """Recode short near-side bridge segments to the far-side TOB code when
+    PHA continuity is confirmed across a data gap.
+
+    When a short bridge segment (< MIN_SEGMENT_MONTHS data points) has the
+    same TOB code as the preceding include_in_his segment (the "near-side"
+    code), it may have been assigned that code simply because it is closer to
+    the near side of a data gap.  If the next include_in_his segment carries a
+    different code (the "far-side" code), we test whether extending the
+    far-side code backwards to cover the bridge is consistent with a single,
+    continuous PHA adjustment across the gap:
+
+      * Collect up to CROSS_GAP_WINDOW months of residuals from the near-side
+        segment, subtract the near-side basis → pre_cents (integer cents).
+      * Collect up to CROSS_GAP_WINDOW months of residuals from the far-side
+        segment, subtract the far-side basis → post_cents.
+      * If len(pre_cents | post_cents) ≤ 3, the PHA is continuous across the
+        gap — the bridge should carry the far-side code.
+      * Additionally verify that the bridge itself is consistent with the
+        far-side code (distinct ≤ 3).
+
+    When the test passes the bridge is recoded to the far-side code and its
+    include_in_his flag is set to True (it now marks a genuine TOB transition).
+    Phase 8 (merge_segments) will then fold the bridge into the far-side
+    segment if no MSHR record separates them.
+    """
+    if len(segments) <= 1:
+        return segments
+
+    CROSS_GAP_WINDOW = 36
+    MAX_DISTINCT = 3
+
+    result = list(segments)
+
+    for i, seg in enumerate(result):
+        # Only look at PHA-only (include_in_his=False) segments
+        if seg.include_in_his:
+            continue
+
+        # Effective data window (in case adjacent segments overlap)
+        eff_start = seg.start_month
+        eff_end = seg.end_month
+        if i > 0 and result[i - 1].end_month >= eff_start:
+            eff_start = result[i - 1].end_month + 1
+        if i < len(result) - 1 and result[i + 1].start_month <= eff_end:
+            eff_end = result[i + 1].start_month - 1
+
+        bridge_count = sum(
+            1 for (y, m) in residuals
+            if eff_start <= to_absolute_month(y, m) <= eff_end
+        )
+        if bridge_count >= MIN_SEGMENT_MONTHS:
+            continue
+
+        near_code = seg.tob_code
+
+        # Find preceding include_in_his=True segment (near-side)
+        prev_his_idx = None
+        for j in range(i - 1, -1, -1):
+            if result[j].include_in_his:
+                prev_his_idx = j
+                break
+        if prev_his_idx is None:
+            continue
+        prev_his_seg = result[prev_his_idx]
+        if prev_his_seg.tob_code != near_code:
+            continue  # bridge code must match the near-side segment
+        if near_code not in basis_vectors:
+            continue
+
+        # Find next include_in_his=True segment; it must carry a different code.
+        # Any intervening include_in_his=False segment means this is not a simple
+        # gap bridge (actual data exists between the bridge and the far side).
+        far_seg_idx = None
+        for j in range(i + 1, len(result)):
+            if result[j].include_in_his:
+                if result[j].tob_code != near_code:
+                    far_seg_idx = j
+                break  # stop at first include_in_his=True regardless
+            else:
+                break  # intervening PHA-only segment → not a gap bridge
+        if far_seg_idx is None:
+            continue
+
+        far_seg = result[far_seg_idx]
+        far_code = far_seg.tob_code
+        if far_code not in basis_vectors:
+            continue
+
+        # Collect pre-bridge residual cents (using near-side basis)
+        near_basis = basis_vectors[near_code]
+        pre_win_end = prev_his_seg.end_month
+        pre_win_start = max(prev_his_seg.start_month,
+                            pre_win_end - CROSS_GAP_WINDOW + 1)
+        pre_cents = set()
+        for (y, m), r in residuals.items():
+            abs_m = to_absolute_month(y, m)
+            if pre_win_start <= abs_m <= pre_win_end and (y, m) in near_basis:
+                pre_cents.add(int(round((r - near_basis[(y, m)]) * 100)))
+
+        if not pre_cents:
+            continue
+
+        # Collect post-bridge residual cents (using far-side basis)
+        far_basis = basis_vectors[far_code]
+        post_win_start = far_seg.start_month
+        post_win_end = min(far_seg.end_month,
+                           post_win_start + CROSS_GAP_WINDOW - 1)
+        post_cents = set()
+        for (y, m), r in residuals.items():
+            abs_m = to_absolute_month(y, m)
+            if post_win_start <= abs_m <= post_win_end and (y, m) in far_basis:
+                post_cents.add(int(round((r - far_basis[(y, m)]) * 100)))
+
+        if not post_cents:
+            continue
+
+        # PHA-continuity check: combined distinct ≤ MAX_DISTINCT
+        combined = pre_cents | post_cents
+        if len(combined) > MAX_DISTINCT:
+            continue
+
+        # Bridge consistency check with far-side code
+        bridge_distinct_far = count_segment_distinct_values(
+            residuals, far_basis, eff_start, eff_end
+        )
+        if bridge_distinct_far > MAX_DISTINCT:
+            continue
+
+        # Also check bridge consistency with the near-side code.
+        # Only recode to far-side if the bridge is strictly MORE consistent
+        # with the far-side code (fewer distinct values).  If the bridge is
+        # equally or more consistent with the near-side, keep it as-is.
+        bridge_distinct_near = count_segment_distinct_values(
+            residuals, near_basis, eff_start, eff_end
+        )
+        if bridge_distinct_near <= bridge_distinct_far:
+            continue
+
+        # All checks passed — recode bridge to far-side code
+        if verbose:
+            sy, sm = from_absolute_month(seg.start_month)
+            ey, em = from_absolute_month(seg.end_month)
+            log(f"  Cross-gap attribution {sy}-{sm:02d}–{ey}-{em:02d}: "
+                f"{near_code} → {far_code} "
+                f"(pre={len(pre_cents)} post={len(post_cents)} "
+                f"combined={len(combined)} bridge_near={bridge_distinct_near} bridge_far={bridge_distinct_far})")
+
+        result[i] = TobSegment(
+            start_month=seg.start_month,
+            end_month=seg.end_month,
+            tob_code=far_code,
+            variance_score=seg.variance_score,
+            include_in_his=True,
+            start_day=seg.start_day,
+            end_day=seg.end_day
+        )
+
+    return result
+
+
+# ==============================================================================
+# Phase 8: Segment Merging
 # ==============================================================================
 
 def merge_segments(segments: List[TobSegment], mshr_records: List[MshrRecord],
@@ -2188,6 +3025,108 @@ def merge_segments(segments: List[TobSegment], mshr_records: List[MshrRecord],
     return merged
 
 
+def trim_anomalous_leading_months(
+        segments: List[TobSegment],
+        residuals: Dict[Tuple[int, int], float],
+        basis_vectors: Dict[str, Dict[Tuple[int, int], float]],
+        verbose: bool = False) -> List[TobSegment]:
+    """Phase 8.5: Trim anomalous leading months from the first segment.
+
+    After merge_segments, the first include_in_his=True segment may have leading
+    data months whose adjusted residuals (R - S_code) don't match the stable level
+    of the rest of the segment.  This happens when:
+      - NOAA's QCF assumed no TOB correction (24HR) for the very first few months,
+      - those months were then merged with a later sub-segment of the same code.
+
+    Detection: scan leading data months and trim those whose adjusted residual
+    (R - S_code) is UNIQUE — i.e. the value does not appear anywhere else in the
+    segment.  Such months have anomalous residuals that cannot be explained by a
+    normal PHA step shared with later data; they likely reflect a mismatch between
+    the assumed TOB code and what NOAA's QCF actually assumed for those months.
+
+    Trimming stops as soon as a leading month's residual is non-unique (appears
+    elsewhere in the segment) or MAX_TRIM months have been removed.
+
+    Only applies to the first include_in_his=True segment when its code ≠ 24HR.
+    """
+    MAX_TRIM = 4
+
+    # Find first include_in_his=True segment
+    first_idx = next((i for i, s in enumerate(segments) if s.include_in_his), None)
+    if first_idx is None:
+        return segments
+
+    seg = segments[first_idx]
+    if seg.tob_code == TOB_NO_BIAS_CODE:
+        return segments
+    if seg.tob_code not in basis_vectors:
+        return segments
+
+    basis = basis_vectors[seg.tob_code]
+
+    # Get sorted data months in this segment that have a basis value
+    data_months = sorted(
+        to_absolute_month(y, m) for (y, m) in residuals
+        if seg.start_month <= to_absolute_month(y, m) <= seg.end_month
+        and (y, m) in basis
+    )
+    if len(data_months) < MAX_TRIM + MIN_PERFECT_FIT_MONTHS:
+        return segments
+
+    # Compute adjusted residuals for all data months
+    all_adj = [
+        int(round((residuals[from_absolute_month(am)] - basis[from_absolute_month(am)]) * 100))
+        for am in data_months
+    ]
+
+    # Find leading months whose adj value is unique (doesn't appear later)
+    best_k = 0
+    for k in range(min(MAX_TRIM, len(data_months) - MIN_PERFECT_FIT_MONTHS)):
+        # Is this leading month's adj value unique (not in the rest of the segment)?
+        if all_adj[k] not in set(all_adj[k + 1:]):
+            best_k = k + 1  # Trim through this month
+        else:
+            break  # This month's value appears later → not anomalous, stop
+
+    if best_k == 0:
+        return segments  # No unique leading months to trim
+
+    prefix_end = data_months[best_k - 1]   # Last month of 24HR prefix
+    main_start = data_months[best_k]        # First month of trimmed segment
+
+    if verbose:
+        py, pm = from_absolute_month(prefix_end)
+        my, mm = from_absolute_month(main_start)
+        log(f"  Trimmed {best_k} leading months from first segment: "
+            f"24HR prefix through {py}-{pm:02d}, "
+            f"{seg.tob_code} starts {my}-{mm:02d} "
+            f"(unique leading adj values: {[all_adj[i] for i in range(best_k)]})")
+
+    prefix_seg = TobSegment(
+        start_month=seg.start_month,
+        end_month=prefix_end,
+        tob_code=TOB_NO_BIAS_CODE,
+        variance_score=0.0,
+        data_count=best_k,
+        include_in_his=True,
+    )
+    trimmed_seg = TobSegment(
+        start_month=main_start,
+        end_month=seg.end_month,
+        tob_code=seg.tob_code,
+        variance_score=seg.variance_score,
+        data_count=seg.data_count - best_k,
+        include_in_his=seg.include_in_his,
+        start_day=seg.start_day,
+        end_day=seg.end_day,
+    )
+
+    result = list(segments)
+    result[first_idx] = trimmed_seg
+    result.insert(first_idx, prefix_seg)
+    return result
+
+
 # ==============================================================================
 # Validation (copied from v2)
 # ==============================================================================
@@ -2198,12 +3137,18 @@ def validate_segments(station_id: str, segments: List[TobSegment],
                      inv_entry: InventoryEntry,
                      tob_bin: Path,
                      qcu_file: Path,
+                     mshr_records: Optional[List[MshrRecord]] = None,
+                     use_mshr_lat_lon: bool = False,
                      verbose: bool = False,
                      debug_dir: Optional[Path] = None) -> bool:
     """Validate reconstructed TOB history and check for remaining exceedances."""
 
     if not segments:
         return True
+
+    if mshr_records is None:
+        mshr_records = []
+    inv_elev_ft = int(round(inv_entry.elev * 3.28084))
 
     with tempfile.TemporaryDirectory() as temp_dir:
         work_dir = Path(temp_dir)
@@ -2214,12 +3159,22 @@ def validate_segments(station_id: str, segments: List[TobSegment],
                 start_y, start_m = from_absolute_month(seg.start_month)
                 end_y, end_m = from_absolute_month(seg.end_month)
 
-                lat_deg, lat_min, lat_sec = decimal_to_dms(inv_entry.lat)
-                lon_deg, lon_min, lon_sec = decimal_to_dms(inv_entry.lon)
-                elev = int(round(inv_entry.elev))
-
                 begin_date = dt.date(start_y, start_m, 1)
                 end_date = dt.date(end_y, end_m, 28)
+
+                if use_mshr_lat_lon:
+                    active = _active_mshr_at(begin_date, mshr_records)
+                    if active and active.lat is not None and active.lon is not None:
+                        lat_deg, lat_min, lat_sec = decimal_to_dms(active.lat)
+                        lon_deg, lon_min, lon_sec = decimal_to_dms(active.lon)
+                    else:
+                        lat_deg, lat_min, lat_sec = decimal_to_dms(inv_entry.lat)
+                        lon_deg, lon_min, lon_sec = decimal_to_dms(inv_entry.lon)
+                    elev = active.elev_ft if (active and active.elev_ft is not None) else inv_elev_ft
+                else:
+                    lat_deg, lat_min, lat_sec = decimal_to_dms(inv_entry.lat)
+                    lon_deg, lon_min, lon_sec = decimal_to_dms(inv_entry.lon)
+                    elev = int(round(inv_entry.elev))
 
                 line = (
                     f"2"
@@ -2236,7 +3191,8 @@ def validate_segments(station_id: str, segments: List[TobSegment],
                 )
                 f.write(line + "\n")
 
-        tob_data = run_tobmain(tob_bin, station_id, qcu_file, his_file, work_dir, inv_entry, verbose, debug_dir)
+        tob_data = run_tobmain(tob_bin, station_id, qcu_file, his_file, work_dir, inv_entry,
+                               use_mshr_lat_lon, verbose, debug_dir)
 
         if tob_data is None:
             if verbose:
@@ -2436,6 +3392,12 @@ def parse_args():
     parser.add_argument('--test-stations', help='Comma-separated list of stations to test (optional)')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
     parser.add_argument('--debug-dir', help='Directory to save failed TOBMain runs for debugging')
+    parser.add_argument(
+        '--mshr-tob-lat-lon', dest='mshr_tob_lat_lon', action='store_true', default=False,
+        help='Use per-period MSHR lat/lon when fitting TOB basis vectors instead of the '
+             'station inventory lat/lon. Does not affect which lat/lon appears in the '
+             'output .his — to omit MSHR from the output, omit --mshr-zip'
+    )
     return parser.parse_args()
 
 
@@ -2559,10 +3521,14 @@ def main():
         if args.verbose:
             log(f"  TOB reconstruction needed")
 
+        station_mshr = mshr_records.get(station_id, [])
+
         # Phase 1: Generate basis vectors
         basis_vectors = generate_basis_vectors(
             station_id, inv_entry, qcu_data, residuals,
-            tob_bin, qcu_file, args.verbose, debug_dir
+            tob_bin, qcu_file,
+            station_mshr, args.mshr_tob_lat_lon,
+            args.verbose, debug_dir
         )
 
         if not basis_vectors:
@@ -2576,28 +3542,44 @@ def main():
             log(f"  ERROR: Forward scan produced no segments for {station_id}")
             continue
 
-        # Phase 2.6: Validate and adjust boundary timing
+        # Phase 3: Validate and adjust boundary timing
         segments = validate_boundary_timing(segments, residuals, basis_vectors, args.verbose)
 
-        # Phase 2.7: Refine spike boundaries with optimal day-of-month
+        # Phase 3b: Back-attribute trailing months that match next segment's level
+        segments = back_attribute_trailing_months(segments, residuals, basis_vectors, args.verbose)
+
+        # Phase 4: Refine spike boundaries with optimal day-of-month
         segments = refine_spike_boundaries(segments, residuals, basis_vectors, args.verbose)
 
-        # Phase 2.8: Fix pathological segmentation (segments < 12 months)
+        # Phase 4b: Heal multi-month edge anomalies at code-changing boundaries
+        segments = heal_edge_transitions(segments, residuals, basis_vectors, args.verbose)
+
+        # Phase 5: Fix pathological segmentation (segments < 12 months)
         segments = detect_and_fix_pathological_segmentation(
             station_id, segments, residuals, basis_vectors, args.verbose
         )
 
+        # Phase 6: Recode short bridge segments to enable merging
+        segments = recode_short_segments(segments, residuals, basis_vectors, args.verbose)
+
+        # Phase 7: Cross-gap TOB attribution
+        segments = cross_gap_attribution(segments, residuals, basis_vectors, args.verbose)
+
         if len(segments) > 1:
             stats['transitions_detected'] += 1
 
-        # Phase 3: Merge same-code segments
-        station_mshr = mshr_records.get(station_id, [])
+        # Phase 8: Merge same-code segments
         segments = merge_segments(segments, station_mshr, args.verbose)
+
+        # Phase 8.5: Trim anomalous leading months from first segment (add 24HR prefix)
+        segments = trim_anomalous_leading_months(segments, residuals, basis_vectors, args.verbose)
 
         # Validation
         is_valid = validate_segments(
             station_id, segments, qcu_data, qcf_data, inv_entry,
-            tob_bin, qcu_file, args.verbose, debug_dir
+            tob_bin, qcu_file,
+            station_mshr, args.mshr_tob_lat_lon,
+            args.verbose, debug_dir
         )
 
         if is_valid:

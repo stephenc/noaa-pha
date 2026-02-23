@@ -239,6 +239,7 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
                 "tob.logger.print-to-stdout = false",
                 "tob.logger.append-datestamp = true",
                 "tob.logger.rollover-datestamp = false",
+                "tob.use-his-lat-lon = false",
             ])
         if dry_run:
             return

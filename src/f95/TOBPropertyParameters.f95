@@ -45,5 +45,9 @@ module TOBPropertyParameters
   character(len=*), parameter :: PROP_TOB_LOG_DATESTAMP         = "tob.logger.append-datestamp"
   !> TOB-specific logger rollover flag. If set, overrides pha.logger.rollover-datestamp.
   character(len=*), parameter :: PROP_TOB_LOG_ROLLOVER          = "tob.logger.rollover-datestamp"
+  !> If true, use the lat/lon decoded from the station .his file (last record)
+  !! rather than the inventory lat/lon for computing bias tables.
+  !! Falls back to inventory when no valid .his lat/lon is found.
+  character(len=*), parameter :: PROP_TOB_USE_HIS_LAT_LON = "tob.use-his-lat-lon"
 
 end module TOBPropertyParameters

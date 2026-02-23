@@ -35,7 +35,9 @@ The `.his` file contains only TOB-related boundaries:
 5. When NO codes remain valid → current month starts new segment
 6. Refine boundaries and validate timing (month and day-level)
 7. Detect and fix pathological segmentation
-8. Merge same-code segments
+8. Recode short bridge segments that a neighbour's code fits better
+9. Cross-gap attribution: extend far-side code over PHA-continuous bridges
+10. Merge same-code segments
 
 ## Detailed Algorithm
 
@@ -43,7 +45,9 @@ The `.his` file contains only TOB-related boundaries:
 
 For each TOB code (07HR, 17HR, 24HR, etc.), generate a basis vector showing the expected TOB adjustment for each month. This is done by running the TOB model with that code to produce adjusted temperatures, then computing the adjustment pattern.
 
-**Cost**: O(30 × T) where T is number of months - only done once per station.
+The inventory lat/lon is used for all periods. Pass `--mshr-tob-lat-lon` to instead encode the full MSHR location history in each synthetic `.his` (one row per MSHR period, same TOB code throughout), causing TOBMain to use the per-period lat/lon when computing expected adjustments. Where no MSHR record exists or coordinates are absent the inventory lat/lon is used as a fallback. The validation run uses the same lat/lon mode as basis vector generation.
+
+**Cost**: O(30 × T) where T is number of months — all codes run in a single TOBMain batch per station.
 
 **Output**: A dictionary mapping each TOB code to its monthly adjustment pattern.
 
@@ -76,7 +80,7 @@ For each month with data:
 
 **Key principle**: Segments grow naturally until perfect fit breaks, rather than pre-computing boundaries.
 
-### Phase 2.5: Boundary Refinement
+### Boundary Refinement (within Phase 2)
 
 When a code is eliminated (distinct values exceed 3), the detection point may lag the actual transition. Refinement scans backwards to find where the residual distribution actually shifted.
 
@@ -88,9 +92,9 @@ When a code is eliminated (distinct values exceed 3), the detection point may la
 
 **Why needed**: The transition month may have intermediate values that don't break the ≤3 threshold immediately, causing delayed detection.
 
-### Phase 2.6: Boundary Timing Validation
+### Phase 3: Boundary Timing Validation
 
-After forward scan completes, refine each boundary by testing adjustments of ±1, ±2, ±3 months to minimize total distinct values across both adjacent segments.
+After forward scan completes, refine each boundary by testing adjustments of ±1 through ±6 months to minimize total distinct values across both adjacent segments.
 
 **Algorithm**:
 ```
@@ -99,7 +103,7 @@ For each boundary between segments A and B:
   best_total = current_total
   best_boundary = current_boundary
 
-  For shift in [-3, -2, -1, +1, +2, +3]:
+  For shift in [-1, +1, -2, +2, -3, +3, -4, +4, -5, +5, -6, +6]:
     A' = segment A with adjusted end
     B' = segment B with adjusted start
     new_total = distinct_values(A') + distinct_values(B')
@@ -111,19 +115,26 @@ For each boundary between segments A and B:
   Update boundary to best_boundary
 ```
 
+Shifts are tried in order of increasing absolute magnitude. When multiple shifts achieve the same total distinct count, the smallest shift (closest to the detected boundary) is preferred, since a later equal shift cannot displace an already-accepted one. A larger shift can still win only if it strictly reduces the total further — which happens when, for example, a missing data month immediately before the true transition causes the scan to land several months late.
+
 **Key principle**: Even when both segments individually achieve "perfect fit" (≤3 distinct values), prefer boundaries that minimize total distinct values. For example, 1+3=4 is better than 3+3=6, even though both configurations have perfect fit on each side.
+
+**Adaptive minimum segment length**: The shift search is constrained so neither segment shrinks below a minimum. For normal-length segments this minimum is `MIN_SEGMENT_MONTHS` (10). For short segments — e.g. the first post-gap window, which may be only a few months — the minimum scales down to `max(2, span // 2)` where `span = end_month - start_month`. This prevents a short post-gap segment from blocking all backward shifts and thereby stranding the true transition boundary several months inside the wrong regime.
 
 **PHA-only detection**: If after adjustment, both segments use the same TOB code and both have perfect fit, this indicates a PHA-only step (constant offset, not TOB change). Mark the second segment as `include_in_his=False` to exclude from output.
 
-**Why needed**: Boundary refinement (Phase 2.5) finds approximately where distributions shifted (within ~6 months). Timing validation fine-tunes to the exact month that minimizes residual complexity across the transition, typically adjusting ±1-3 months from the initial detection point.
-
-### Phase 2.7: Spike Boundary Refinement (Day-Level)
+### Phase 4: Spike Boundary Refinement (Day-Level)
 
 For code-changing boundaries where the transition month contains an out-of-bound residual spike affecting both codes, search within the month (days 2-31) to find the optimal day that minimizes the spike artifact.
 
 **When applied**: Only at boundaries where:
 1. TOB code changes (not PHA-only transitions)
 2. Transition month residual is outside expected range for BOTH codes (±0.01°C tolerance from ±6 month window)
+
+Two check directions are performed for each boundary:
+
+- **Forward spike** (existing): the **first** month of the new segment is the suspected transition month. Applied when validate_boundary_timing placed the boundary at month T but month T's residual doesn't fit either adjacent code.
+- **Backward spike** (new): the **last** month of the old segment is the suspected transition month. Applied when the true regime change happened mid-month within `prev_seg.end_month` rather than at the start of the new segment. The backward check fires first; if it triggers, the forward check is skipped for that boundary.
 
 **Algorithm**:
 ```
@@ -149,7 +160,7 @@ For each qualifying boundary:
 
 **Why needed**: Some transitions produce single-month residual spikes that fall outside the normal range for both codes. Month-level boundaries would force the entire month into one code, preserving the spike. Day-level splits allow TOBMain to apply weighted averaging, potentially reducing the spike to within expected ranges.
 
-### Phase 2.8: Pathological Segmentation Detection
+### Phase 5: Pathological Segmentation Detection
 
 When forward scan produces segments changing more frequently than every 12 months, this indicates fitting to seasonal noise rather than actual TOB regime changes.
 
@@ -202,12 +213,78 @@ After growing regions, gaps may exist between adjacent pathological regions. Whe
 
 Before processing pathological regions:
 - Drop regions < 12 months (too short to reliably assess if pathological)
-- Ensure adjacent pathological regions are properly separated
+- Merge overlapping regions: two grown regions can overlap (share segment indices) when different seed pathological segments independently grow into the same territory. Overlapping regions are merged into a single region covering the union of their segment indices, then reassigned the best-variance code for that combined span.
 - Refine boundaries if needed for better fit
 
-### Phase 3: Segment Merging
+### Phase 6: Short Bridge Segment Recoding
 
-After pathological detection and gap handling, merge consecutive segments with the same TOB code.
+Short segments (fewer than `MIN_SEGMENT_MONTHS` data points) can arise when the forward scan traverses a data gap. The few data points in the bridge may be consistent with several codes, and the chosen code may differ from the dominant neighbouring regime.
+
+**Algorithm**:
+
+```
+For each segment S with data_point_count(S) < MIN_SEGMENT_MONTHS:
+  If S is excluded from .his (PHA-only), skip
+  Build candidate set: {prev_code, next_code} from adjacent include_in_his segments
+  Compute distinct-value count for S under S's current code
+  Compute distinct-value count for S under each candidate code
+
+  If any candidate gives strictly fewer distinct values:
+    Recode S to the best candidate
+    (Phase 8 will then merge S with the same-code neighbour)
+  Elif a candidate gives equal distinct values AND that code appears on BOTH sides:
+    Recode S to that code (eliminates the bridge entirely after merging)
+  Else:
+    Leave S unchanged (current code is already optimal given the data)
+
+Repeat until no further recodes occur.
+```
+
+**Key constraint**: Only recodes when a neighbour's code gives a *strictly* better fit. If the current code is tied with or better than both neighbours — which happens when the bridge data was genuinely observed under that code — the bridge is left unchanged.
+
+**Example**: A 6-month `24HR` bridge between `07HR` and `00SS`:
+- If `24HR` gives 3 distinct values, `00SS` gives 5, `07HR` gives 6 → no recode (24HR is best)
+- If `24HR` gives 3 distinct values, `00SS` gives 1 → recode to `00SS`, enabling merge with the long `00SS` successor
+
+### Phase 7: Cross-Gap TOB Attribution
+
+When the forward scan crosses a data gap, a short bridge segment may be assigned the **near-side TOB code** (the same code as the immediately preceding segment) even though the data in the bridge is equally consistent with the **far-side code** (the code of the next include_in_his segment). This misattribution happens because the forward scan begins each gap by continuing from the last known code.
+
+The cross-gap attribution phase corrects this by testing whether the PHA adjustment is continuous across the gap.
+
+**Algorithm**:
+
+```
+For each segment B with data_point_count(B) < MIN_SEGMENT_MONTHS AND include_in_his=False:
+  near_code = B.tob_code
+  prev_his_seg = most recent include_in_his=True segment before B
+  If prev_his_seg.tob_code ≠ near_code: skip  (bridge code must match near-side)
+
+  far_seg = next include_in_his=True segment after B
+  If far_seg.tob_code == near_code: skip  (no TOB change to attribute)
+  far_code = far_seg.tob_code
+
+  # Collect residuals from each side of the gap
+  pre_cents  = { round((R(t) - near_basis(t)) * 100) : t ∈ prev_his_seg, last 36 months }
+  post_cents = { round((R(t) - far_basis(t))  * 100) : t ∈ far_seg,      first 36 months }
+
+  # PHA-continuity test
+  If len(pre_cents | post_cents) > 3: skip  (PHA step across gap → keep original boundary)
+
+  # Bridge consistency test
+  bridge_distinct = count_distinct(R(t) - far_basis(t) for t ∈ B)
+  If bridge_distinct > 3: skip
+
+  # Tests passed: bridge belongs to the far-side regime
+  Recode B to far_code, set include_in_his = True
+  (Phase 8 merge_segments will then fold B into far_seg if no MSHR separates them)
+```
+
+**Why this works**: R(t) = PHA(t) + TOB_code(t). If `pre_cents ∪ post_cents` has ≤ 3 distinct values, the PHA component is constant across the gap under the respective code bases — meaning there is no PHA step at the gap boundary. The TOB boundary belongs on the far side of the gap, not at the data edge closest to the near side.
+
+### Phase 8: Segment Merging
+
+After all boundary refinement and bridge recoding, merge consecutive segments with the same TOB code.
 
 **Merging rules**:
 - Combine if same code and no documented MSHR record between them
@@ -217,7 +294,24 @@ After pathological detection and gap handling, merge consecutive segments with t
 
 **Purpose**: Ensures PHA-only transitions don't break up same-code TOB runs in the output.
 
-### Phase 4: Code Selection (Tie-Breaking)
+### Output: .his File Generation
+
+The `.his` file is built from the final set of segments plus all MSHR records for the station.
+
+**Row structure**: Each output row spans a contiguous date range and carries a single TOB code. Multiple rows are produced per TOB segment when MSHR records begin within or after that segment's date range.
+
+**MSHR split points**: For every MSHR record whose `begin_date` falls within a TOB segment's range, an additional row begins at that MSHR `begin_date` (same TOB code, updated metadata from the new MSHR record).
+
+**Trailing MSHR records**: MSHR records beginning after the last TOB segment's end produce additional rows, carrying the last known TOB code. This ensures the `.his` file covers the full span of documented station history even beyond the data used for reconstruction.
+
+**Contiguous dates**: Each row's `end_date` is derived as the day before the following row's `begin_date` (or the station's last data month, or the trailing MSHR record's `end_date`). No gaps or overlaps exist between rows.
+
+**Per-row metadata**:
+- **lat/lon**: From the MSHR record active at that row's start date (i.e., the most recent MSHR record with `begin_date ≤ row_begin`). Falls back to the station inventory if no MSHR record exists or the record has no coordinates.
+- **elevation**: Ground elevation (feet) from the active MSHR record's `ELEV_GROUND` field. Falls back to the inventory elevation converted from metres to feet.
+- **relocation flag**: The `distance_and_direction` field (11 characters) is populated from the MSHR `RELOCATION` field (first 11 characters) when a row begins at a MSHR `begin_date` and that record's `RELOCATION` field is non-blank. This signals to TOBMain that the station moved at this date. Rows that do not correspond to a MSHR `begin_date`, or whose MSHR record has a blank `RELOCATION` field, leave `distance_and_direction` blank.
+
+### Code Selection within Phase 2 (Tie-Breaking)
 
 When multiple codes produce perfect fit, choose using priority order:
 
@@ -228,7 +322,7 @@ When multiple codes produce perfect fit, choose using priority order:
 
 **Rationale**: All perfect fits are mathematically equivalent. We favor codes that produce simpler histories (fewer transitions) and avoid unusual codes unless necessary.
 
-### Phase 5: Walk-Back for TOB+PHA Cases
+### Walk-Back for TOB+PHA Cases (within Phase 2)
 
 When TOB change and PHA step occur within 18 months, forward scan may not find perfect fit until after both transitions. Walk backwards from the stable zone to determine transition order.
 
@@ -257,7 +351,7 @@ Check by grouping residuals by calendar month:
 - TOB change segment: `include_in_his=True`
 - PHA step segment: `include_in_his=False`
 
-### Phase 6: Gap Handling
+### Gap Handling (within Phase 2)
 
 Gaps ≥12 months in data coverage force explicit boundary creation:
 
@@ -317,7 +411,7 @@ Single core criterion: ≤3 distinct values for perfect fit. Few tunable paramet
 - **Sparse data**: Forward scan continues until codes differentiate
 - **Multiple transitions**: Walk-back handles TOB+PHA within 18 months
 - **Unusual codes**: Used only when necessary for perfect fit
-- **Boundary errors**: Multi-level refinement achieves precise timing (month ±3, day within spike months)
+- **Boundary errors**: Multi-level refinement achieves precise timing (month ±6, day within spike months)
 - **Pathological patterns**: Pattern matching detects and fixes
 
 ### Proper PHA Handling
@@ -346,10 +440,11 @@ At every step we can inspect:
 | **Parameters** | Single criterion (≤3 distinct values) |
 | **PHA handling** | Walk-back distinguishes types; timing validation detects PHA-only; gap marking for same-code regions |
 | **Pathological patterns** | Pattern matching (±0.01°C) grows regions; stops at PHA boundaries |
+| **Short bridge recoding** | Recode if neighbour code gives strictly fewer distinct values; strict-tie means current code is genuinely best |
 | **Tie-breaking** | Fewest values → longest runs → common codes |
 | **Gap handling** | Explicit detection (≥12 months → force boundary) |
 | **TOB+PHA cases** | Walk-back during forward scan |
-| **Boundary precision** | Backtrack refinement + timing validation (±3 months) + day-level for spikes |
+| **Boundary precision** | Backtrack refinement + timing validation (±6 months) + day-level for spikes |
 | **Computational cost** | O(T × K) integrated scan where T=months, K=codes |
 | **Modularity** | Single forward scan with refinement phases |
 
@@ -397,12 +492,13 @@ On the full USHCN dataset (27,955 stations):
 The algorithm achieves high success by:
 1. Growing segments until perfect fit breaks
 2. Refining boundaries to exact shift points
-3. Validating boundary timing (±3 months adjustment)
+3. Validating boundary timing (±6 months adjustment)
 4. Refining spike boundaries (day-level for out-of-bound transitions)
 5. Detecting and fixing pathological segmentation
-5. Distinguishing TOB from PHA transitions
-6. Marking PHA-only gaps between same-code regions
-7. Merging same-code segments
+6. Recoding short bridge segments when a neighbour's code fits better
+7. Distinguishing TOB from PHA transitions
+8. Marking PHA-only gaps between same-code regions
+9. Merging same-code segments
 
 ## Summary
 

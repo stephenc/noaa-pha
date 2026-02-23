@@ -64,6 +64,9 @@ program TOBMain
 
   character(len=11)  :: station_id
   real               :: lat, lon
+  real               :: his_lat, his_lon   ! lat/lon decoded from .his (DMS→decimal)
+  logical            :: his_lat_valid      ! .true. if .his contained usable lat/lon
+  logical            :: use_his_lat_lon    ! property: tob.use-his-lat-lon
 
   integer :: meta_unit
   integer :: read_status
@@ -113,6 +116,7 @@ program TOBMain
   tob_start_from_history = get_property_logical(PROP_TOB_START_FROM_HISTORY)
   tob_backfill_if_first_nonblank = get_property_logical(PROP_TOB_BACKFILL_FIRST_NONBLANK)
   tob_pause_on_blank = get_property_logical(PROP_TOB_PAUSE_ON_BLANK)
+  use_his_lat_lon = get_property_logical(PROP_TOB_USE_HIS_LAT_LON)
 
   if(len_trim(data_type) == 0) then
     if(index(raw_dir, "/raw/") > 0) then
@@ -131,6 +135,7 @@ program TOBMain
   call log_info("TOB start from history: " // trim(log_string(tob_start_from_history)))
   call log_info("TOB backfill if first nonblank: " // trim(log_string(tob_backfill_if_first_nonblank)))
   call log_info("TOB pause on blank after nonblank: " // trim(log_string(tob_pause_on_blank)))
+  call log_info("TOB use .his lat/lon: " // trim(log_string(use_his_lat_lon)))
 
   ! ---------------------------------------------------------------------------
   ! 3.  Derive tob output directory
@@ -183,6 +188,7 @@ program TOBMain
     input_file  = trim(raw_dir) // trim(station_id) // '.' // trim(data_type) // '.' // trim(element)
     output_file = trim(tob_dir) // trim(station_id) // '.tob.' // trim(element)
     his_file    = trim(history_dir) // trim(station_id) // '.his'
+    his_lat_valid = .false.
 
     ! -----------------------------------------------------------------------
     ! 5b. Skip station if raw input file is missing
@@ -197,6 +203,14 @@ program TOBMain
     ! 5c. Read observation-time history
     ! -----------------------------------------------------------------------
     call read_history()
+
+    if (use_his_lat_lon .and. his_lat_valid) then
+      lat = his_lat
+      lon = his_lon
+      call log_info("TOBMain: " // trim(station_id) // &
+                    " — using .his lat/lon: " // &
+                    trim(log_string(lat)) // ", " // trim(log_string(lon)))
+    end if
 
     if (nchgs == 0) then
       ! No usable history -> copy verbatim (default TOB=2400)
@@ -452,6 +466,15 @@ contains
                                   instr_height_full, obs_time,     &
                                   instr
       if (ios /= 0) exit
+
+      ! Capture lat/lon from this record (last valid record wins).
+      ! .his stores lon_deg already negative for western longitudes;
+      ! minutes/seconds are always positive, so subtract to maintain sign.
+      if (lat_deg /= 0.0 .or. lat_min /= 0.0 .or. lat_sec /= 0.0) then
+        his_lat = lat_deg + lat_min / 60.0 + lat_sec / 3600.0
+        his_lon = lon_deg - lon_min / 60.0 - lon_sec / 3600.0
+        his_lat_valid = .true.
+      end if
 
       ! Skip daily (TD3200) records
       if (source == 1) cycle
