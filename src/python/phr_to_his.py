@@ -359,8 +359,8 @@ def format_his_line(
     line = (
         f"{source:1d}"  # i1
         f"{' ' * 12}"
-        f" {begin_date.year:4d}{begin_date.month:02d}{begin_date.day:02d}"
-        f" {end_date.year:4d}{end_date.month:02d}{end_date.day:02d}"
+        f" {begin_date.year:04d}{begin_date.month:02d}{begin_date.day:02d}"
+        f" {end_date.year:04d}{end_date.month:02d}{end_date.day:02d}"
         f" {lat_deg:3.0f}{lat_min:3.0f}{lat_sec:3.0f}"
         f" {lon_deg:4.0f}{lon_min:3.0f}{lon_sec:3.0f}"
         f" {distance_and_direction}"
