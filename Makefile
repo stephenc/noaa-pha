@@ -2,7 +2,35 @@
 FC = gfortran
 FCFLAGS = -O2 # -Wall -Wextra -Wno-unused-parameter -fPIC
 F77FLAGS = -ffixed-form -fno-range-check -fno-sign-zero -std=legacy
-F95FLAGS = -cpp
+# --- Compiler-family flags -----------------------------------------------------
+# The default build uses gfortran. Intel Fortran (classic `ifort`, free via Intel
+# oneAPI <=2024) is supported as a fidelity-reference build — NOAA's published
+# GHCN-M v4 TOB was produced with classic ifort, so an ifort build reproduces a
+# couple of floating-point knife-edge cells that gfortran rounds the other way.
+#   Build with Intel:   make FC=ifort bin/TOBMain
+#                       (or FC=ifx). Requires oneAPI setvars.sh sourced.
+#
+# Family-specific flags (consumed by the F95 rules generated in deps.mk):
+#   F95FLAGS  preprocess + free-form line length
+#   MOD_OUT   where .mod files are written/read
+#   TF        force a .f95 file to compile as free-form Fortran (Intel only;
+#             gfortran recognises .f95 directly)
+ifneq (,$(filter ifort ifx,$(notdir $(FC))))
+  # Intel Fortran (ifort / ifx). -heap-arrays: Intel puts large automatic/
+  # temporary arrays on the stack by default and overflows the 8 MB stack in
+  # PHAMain (immediate SIGSEGV); gfortran heap-allocates them. This moves them
+  # to the heap to match. Results are unaffected (only allocation location).
+  F95FLAGS = -fpp -free -extend-source 132 -heap-arrays
+  MOD_OUT  = -module $(ABS_OBJ_DIR)
+  TF       = -Tf
+else
+  # gfortran (default). -ffree-line-length-none: the CFAV/CFMN/CFMX and BLOCK
+  # DATA arrays in TOBUtils.f95 exceed the 132-char free-form limit; gfortran
+  # 13.x errors on them with -Werror=line-truncation without this.
+  F95FLAGS = -cpp -ffree-line-length-none
+  MOD_OUT  = -J$(ABS_OBJ_DIR)
+  TF       =
+endif
 
 # Directories (use absolute paths internally for robustness, though not strictly required)
 # CURDIR is a Make built-in variable representing the current working directory.
@@ -110,3 +138,22 @@ $(GO_VIEWER_BIN): $(GO_VIEWER_SOURCES) | $(DIRS)
 	cd "$(ABS_GO_DIR)" && "$(GO)" build -o "$@" .
 
 -include deps.mk
+
+# --- Convenience aliases -----------------------------------------------------
+# The real build targets are absolute paths ($(CURDIR)/bin/NAME). Without these
+# aliases, `make TOBMain` or `make bin/TOBMain` is interpreted as an existing,
+# up-to-date file and silently does nothing ("Nothing to be done"), even after a
+# source edit. Each alias is .PHONY and forwards the short/relative name to the
+# absolute target, which rebuilds correctly via the deps.mk rules whenever a
+# source file (or one of its module dependencies) changes.
+#
+# PROGRAMS is defined in the generated deps.mk; if deps.mk is stale/missing, make
+# regenerates it (via the deps.mk rule) and re-reads this Makefile, at which point
+# the list below is populated — so the aliases work even on a clean checkout.
+ALIAS_TARGETS := $(PROGRAMS) $(notdir $(AWK_TARGETS)) $(notdir $(GO_VIEWER_BIN))
+define _bin_alias
+.PHONY: $(1) bin/$(1)
+$(1) bin/$(1): deps.mk $(ABS_BIN_DIR)/$(1)
+	@:
+endef
+$(foreach _t,$(ALIAS_TARGETS),$(eval $(call _bin_alias,$(_t))))

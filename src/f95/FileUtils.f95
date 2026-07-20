@@ -73,10 +73,23 @@ contains
   !! @param directory The path to the directory.
   !! @return True if the directory exists. Otherwise, false.
   function does_directory_exist(directory) result(exists)
+    use iso_c_binding, only: c_char, c_int, c_null_char
     character(len=*) :: directory
     logical :: exists
+    interface
+      function c_access(pathname, mode) bind(C, name="access") result(res)
+        import :: c_char, c_int
+        character(kind=c_char), intent(in) :: pathname(*)
+        integer(c_int), value, intent(in) :: mode
+        integer(c_int) :: res
+      end function c_access
+    end interface
 
-    inquire(file=trim(directory)//"/.", exist=exists)
+    ! POSIX access(path, F_OK=0) returns 0 iff the path exists (file OR
+    ! directory). Portable across gfortran and Intel Fortran. The previous
+    ! inquire(file=dir//"/.", exist=) was gfortran-specific: Intel Fortran
+    ! returns .false. for a directory, breaking the output-dir check.
+    exists = (c_access(trim(directory) // c_null_char, 0_c_int) == 0)
 
   end function does_directory_exist
 
