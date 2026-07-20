@@ -864,9 +864,11 @@ contains
   !! @return first_diffs The first differences calculated.
   function calculate_first_diffs (values_count, values) result(first_diffs)
 
+    ! values_count must be declared before it is used as an array bound below;
+    ! gfortran tolerates the reverse order but ifort (correctly) does not.
+    integer :: values_count
     real, dimension(:) :: values(values_count)
     real, dimension(:) :: first_diffs(values_count)
-    integer :: values_count
 
     integer :: i
 
