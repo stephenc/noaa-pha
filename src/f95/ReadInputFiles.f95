@@ -1072,7 +1072,7 @@ contains
 
       read(mmunit,'(2x,a11,i7,i2)', IOSTAT=file_status) pthorne_station, year_month, itemp
       if (file_status > 0 ) then
-        call perror('ReadInputFiles::read_pthorne_history: Cannot read mattmeta file ' // trim(mattmeta))
+        call log_error('ReadInputFiles::read_pthorne_history: Cannot read mattmeta file ' // trim(mattmeta))
         stop 1
       endif
       if (file_status < 0 ) exit
