@@ -2,12 +2,32 @@
 FC = gfortran
 FCFLAGS = -O2 # -Wall -Wextra -Wno-unused-parameter -fPIC
 F77FLAGS = -ffixed-form -fno-range-check -fno-sign-zero -std=legacy
-# -ffree-line-length-none: several calibration-table declarations (e.g. the
-# CFAV/CFMN/CFMX and BLOCK DATA arrays in TOBUtils.f95) exceed the 132-char
-# free-form limit. gfortran silently read them on some versions but 13.x errors
-# with -Werror=line-truncation, breaking portability. This removes the limit
-# (semantically neutral where the full line was already read).
-F95FLAGS = -cpp -ffree-line-length-none
+# --- Compiler-family flags -----------------------------------------------------
+# The default build uses gfortran. Intel Fortran (classic `ifort`, free via Intel
+# oneAPI <=2024) is supported as a fidelity-reference build — NOAA's published
+# GHCN-M v4 TOB was produced with classic ifort, so an ifort build reproduces a
+# couple of floating-point knife-edge cells that gfortran rounds the other way.
+#   Build with Intel:   make FC=ifort bin/TOBMain
+#                       (or FC=ifx). Requires oneAPI setvars.sh sourced.
+#
+# Family-specific flags (consumed by the F95 rules generated in deps.mk):
+#   F95FLAGS  preprocess + free-form line length
+#   MOD_OUT   where .mod files are written/read
+#   TF        force a .f95 file to compile as free-form Fortran (Intel only;
+#             gfortran recognises .f95 directly)
+ifneq (,$(filter ifort ifx,$(notdir $(FC))))
+  # Intel Fortran (ifort / ifx)
+  F95FLAGS = -fpp -free -extend-source 132
+  MOD_OUT  = -module $(ABS_OBJ_DIR)
+  TF       = -Tf
+else
+  # gfortran (default). -ffree-line-length-none: the CFAV/CFMN/CFMX and BLOCK
+  # DATA arrays in TOBUtils.f95 exceed the 132-char free-form limit; gfortran
+  # 13.x errors on them with -Werror=line-truncation without this.
+  F95FLAGS = -cpp -ffree-line-length-none
+  MOD_OUT  = -J$(ABS_OBJ_DIR)
+  TF       =
+endif
 
 # Directories (use absolute paths internally for robustness, though not strictly required)
 # CURDIR is a Make built-in variable representing the current working directory.

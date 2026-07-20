@@ -219,9 +219,11 @@ def generate_deps():
                 f.write(
                     f"$(ABS_OBJ_DIR)/{base}.o: $(ABS_F95_DIR)/{file} {' '.join(used_mod_files)}\n"
                 )
-                # Use -J to specify where .mod files are created/found
+                # $(MOD_OUT) and $(TF) are compiler-family flags set in the
+                # Makefile: gfortran uses -J<dir> and plain -c; Intel (ifort/ifx)
+                # uses -module <dir> and -Tf (to compile a .f95 as free-form).
                 f.write(
-                    "\t$(FC) $(FCFLAGS) $(F95FLAGS) -I$(ABS_OBJ_DIR) -J$(ABS_OBJ_DIR) -c $< -o $@\n\n"
+                    "\t$(FC) $(FCFLAGS) $(F95FLAGS) -I$(ABS_OBJ_DIR) $(MOD_OUT) -c $(TF) $< -o $@\n\n"
                 )
 
             # Rules for .mod files (depend on the .o file that creates them)
