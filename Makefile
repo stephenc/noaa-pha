@@ -110,3 +110,22 @@ $(GO_VIEWER_BIN): $(GO_VIEWER_SOURCES) | $(DIRS)
 	cd "$(ABS_GO_DIR)" && "$(GO)" build -o "$@" .
 
 -include deps.mk
+
+# --- Convenience aliases -----------------------------------------------------
+# The real build targets are absolute paths ($(CURDIR)/bin/NAME). Without these
+# aliases, `make TOBMain` or `make bin/TOBMain` is interpreted as an existing,
+# up-to-date file and silently does nothing ("Nothing to be done"), even after a
+# source edit. Each alias is .PHONY and forwards the short/relative name to the
+# absolute target, which rebuilds correctly via the deps.mk rules whenever a
+# source file (or one of its module dependencies) changes.
+#
+# PROGRAMS is defined in the generated deps.mk; if deps.mk is stale/missing, make
+# regenerates it (via the deps.mk rule) and re-reads this Makefile, at which point
+# the list below is populated — so the aliases work even on a clean checkout.
+ALIAS_TARGETS := $(PROGRAMS) $(notdir $(AWK_TARGETS)) $(notdir $(GO_VIEWER_BIN))
+define _bin_alias
+.PHONY: $(1) bin/$(1)
+$(1) bin/$(1): deps.mk $(ABS_BIN_DIR)/$(1)
+	@:
+endef
+$(foreach _t,$(ALIAS_TARGETS),$(eval $(call _bin_alias,$(_t))))
