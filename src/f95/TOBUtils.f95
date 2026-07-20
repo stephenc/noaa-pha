@@ -741,14 +741,16 @@ contains
       end if
 
       ! Quadrant assignment:  Q1=NE, Q2=NW, Q3=SW, Q4=SE
-      if (dlat >= 0.) then
-        if (dlon >= 0.) then
+      ! On-axis (dlat/dlon exactly 0 to stored precision) goes S/W, matching
+      ! genuine v3 QUAD (ushcn_tobs.v4a.f: DLAT/DLON .GE. 0.000001), NOT N/E.
+      if (dlat >= 0.000001) then
+        if (dlon >= 0.000001) then
           if (dist < q_dz(1)) then;  q_dz(1) = dist;  q_iz(1) = i;  end if
         else
           if (dist < q_dz(2)) then;  q_dz(2) = dist;  q_iz(2) = i;  end if
         end if
       else
-        if (dlon >= 0.) then
+        if (dlon >= 0.000001) then
           if (dist < q_dz(4)) then;  q_dz(4) = dist;  q_iz(4) = i;  end if
         else
           if (dist < q_dz(3)) then;  q_dz(3) = dist;  q_iz(3) = i;  end if
