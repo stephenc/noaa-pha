@@ -240,6 +240,9 @@ end subroutine degrees2radians
 !*******************************************************************************
 
 subroutine geographic_distance(X1,Y1,X2,Y2,DISTANCE)
+#ifdef LIBM_LLVM_COMPAT
+use libm_llvm_compat, only: cos => cosf_c, sin => sinf_c, acos => acosf_c, asin => asinf_c
+#endif
 
 real, intent(in) :: X1,X2,Y1,Y2
 real :: rX1,rX2,rY1,rY2,x
