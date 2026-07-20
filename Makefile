@@ -2,7 +2,12 @@
 FC = gfortran
 FCFLAGS = -O2 # -Wall -Wextra -Wno-unused-parameter -fPIC
 F77FLAGS = -ffixed-form -fno-range-check -fno-sign-zero -std=legacy
-F95FLAGS = -cpp
+# -ffree-line-length-none: several calibration-table declarations (e.g. the
+# CFAV/CFMN/CFMX and BLOCK DATA arrays in TOBUtils.f95) exceed the 132-char
+# free-form limit. gfortran silently read them on some versions but 13.x errors
+# with -Werror=line-truncation, breaking portability. This removes the limit
+# (semantically neutral where the full line was already read).
+F95FLAGS = -cpp -ffree-line-length-none
 
 # Directories (use absolute paths internally for robustness, though not strictly required)
 # CURDIR is a Make built-in variable representing the current working directory.
