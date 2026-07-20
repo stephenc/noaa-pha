@@ -10,11 +10,21 @@ They are **not** part of the original NOAA source-code tarball. Their purpose is
 
 ## What Each Script Does
 
-- `qcufdelta_to_his.py`
+- `qcuf_pattern_to_his.py`
   - Reconstructs Time-of-Observation (TOB) histories from QCU/QCF residuals.
-  - Reverse-engineers the TOB code timeline by analyzing the difference between adjusted (QCF) and unadjusted (QCU) data.
-  - Outputs `.his` files compatible for the PHA pipeline.
-  - **Theory**: See [qcufdelta_to_his.md](qcufdelta_to_his.md) for mathematical foundation and algorithm details.
+  - Separates the TOB code timeline algebraically from `R(t) = QCF(t) - QCU(t)`,
+    identifies each regime against per-code bias vectors from TOBMain, and
+    delivers each `.his` using only documented coordinates (published inventory
+    or MSHR positions) — never a grid-fitted coordinate.
+  - Outputs `.his` files compatible with the PHA pipeline.
+- `ghcnm_tob_io.py`
+  - Shared I/O, data model, and utilities (inventory / station-data / MSHR
+    parsing, TOB code tables, `TobSegment`, month/coordinate helpers) used by
+    the reconstruction solver.
+- `tob_seasonal_acceptance.py`
+  - PHA-robust acceptance metric: after removing the piecewise-constant PHA
+    structure, checks that each reconstructed history leaves no residual
+    per-calendar-month (seasonal) TOB bias.
 
 - `phr_to_his.py`
   - Reconstructs station history (`.his`) files from the HOMR PHR fixed-width report.
