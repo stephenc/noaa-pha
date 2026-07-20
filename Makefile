@@ -16,8 +16,11 @@ F77FLAGS = -ffixed-form -fno-range-check -fno-sign-zero -std=legacy
 #   TF        force a .f95 file to compile as free-form Fortran (Intel only;
 #             gfortran recognises .f95 directly)
 ifneq (,$(filter ifort ifx,$(notdir $(FC))))
-  # Intel Fortran (ifort / ifx)
-  F95FLAGS = -fpp -free -extend-source 132
+  # Intel Fortran (ifort / ifx). -heap-arrays: Intel puts large automatic/
+  # temporary arrays on the stack by default and overflows the 8 MB stack in
+  # PHAMain (immediate SIGSEGV); gfortran heap-allocates them. This moves them
+  # to the heap to match. Results are unaffected (only allocation location).
+  F95FLAGS = -fpp -free -extend-source 132 -heap-arrays
   MOD_OUT  = -module $(ABS_OBJ_DIR)
   TF       = -Tf
 else
