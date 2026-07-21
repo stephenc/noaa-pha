@@ -87,10 +87,10 @@ python3 src/python/qcu_to_inputs.py --qcu-tar data/ghcnm.tavg.latest.qcu.tar.gz 
 python3 src/python/qcf_to_outputs.py --qcf-tar data/ghcnm.tavg.latest.qcf.tar.gz --base data
 ```
 
-4. Reconstruct TOB history files (`data/input/history/*.his`) from QCU/QCF deltas:
+4. Reconstruct TOB history files (`data/input/history/*.his`) from QCU/QCF residuals:
 
 ```bash
-python3 src/python/qcufdelta_to_his.py \
+python3 src/python/qcuf_pattern_to_his.py \
   --inv data/input/station.inv \
   --qcu-dir data/input/raw/tavg \
   --qcf-dir data/output/qcf/tavg \
