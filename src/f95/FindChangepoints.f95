@@ -699,6 +699,20 @@ contains
     ! 1 = 97.5%; 5 = 95%; 10=90%
     snht_threshold = get_property_int(PROP_SNHT_THRESHOLD)
 
+    ! Divergence from NOAA's original source (see docs/CHANGES.md): fail loud on
+    ! an unsupported SNHT threshold. get_critical_value() below only handles
+    ! {1, 5, 10} and has no default branch, so any other value leaves its
+    ! critical-value table uninitialised -- undefined behaviour that silently
+    ! yields meaningless changepoints (and sometimes crashes). Behaviour is
+    ! unchanged for every valid input; only invalid input, which NOAA never
+    ! passes, is affected.
+    if(snht_threshold /= OPT_SNHT_97_5 .and. snht_threshold /= OPT_SNHT_95 &
+         .and. snht_threshold /= OPT_SNHT_90) then
+      call log_fatal("pha.snht-threshold must be 1 (97.5%), 5 (95%), or " // &
+           "10 (90%); got " // trim(log_string(snht_threshold)))
+      error stop "invalid pha.snht-threshold (must be 1, 5, or 10)"
+    end if
+
     change_count = 0
 
     ! initialize inhomog expansion series array and indices these are working arrays
