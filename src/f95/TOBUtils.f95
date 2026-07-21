@@ -715,6 +715,9 @@ contains
   !  change.  Matches v3 QUAD + the caching wrapper in FNDIFF/FNRNG.
   ! ---------------------------------------------------------------------------
   subroutine find_quad(lat, lon)
+#ifdef LIBM_LLVM_COMPAT
+    use libm_llvm_compat, only: cos => cosf_c, sin => sinf_c, acos => acosf_c, asin => asinf_c
+#endif
     real, intent(in) :: lat, lon
     real :: dlat, dlon, olat, dist
     integer :: i
@@ -815,6 +818,9 @@ contains
   !  Faithful port of v3 SOLAR.
   ! ---------------------------------------------------------------------------
   subroutine solar(lat, lon, itz, imo, elev, sr, ss)
+#ifdef LIBM_LLVM_COMPAT
+    use libm_llvm_compat, only: cos => cosf_c, sin => sinf_c, acos => acosf_c, asin => asinf_c
+#endif
     real,    intent(inout) :: lat          ! may be clamped to ±89.99
     real,    intent(in)    :: lon
     integer, intent(in)    :: itz, imo

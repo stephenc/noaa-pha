@@ -322,6 +322,9 @@ contains
   !! @param lon_neighbor Longitude of neighbor station with double precision.
   !! @return Distance in kilometers.
   function calculate_distance(lat_target, lon_target, lat_neighbor, lon_neighbor) result(distance)
+#ifdef LIBM_LLVM_COMPAT
+    use libm_llvm_compat, only: cos => cosf_c, sin => sinf_c, acos => acosf_c, asin => asinf_c
+#endif
     ! Params and return value
     real :: lat_target
     real :: lon_target

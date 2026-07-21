@@ -200,10 +200,10 @@ def generate_deps():
                     if m in module_to_file
                 ]
                 f.write(
-                    f"$(ABS_BIN_DIR)/{program}: $(ABS_OBJ_DIR)/{program}.o {' '.join(module_o_files)}\n"
+                    f"$(ABS_BIN_DIR)/{program}: $(ABS_OBJ_DIR)/{program}.o {' '.join(module_o_files)} $(EXTRA_LINK_OBJS)\n"
                 )
                 f.write(
-                    "\t$(FC) $(FCFLAGS) $(F95FLAGS) $^ -o $@\n\n"
+                    "\t$(FC) $(FCFLAGS) $(F95FLAGS) $^ $(LDFLAGS_TRIG) -o $@\n\n"
                 )
 
             # Compilation rules for all F95 source files

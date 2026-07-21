@@ -508,6 +508,9 @@ end subroutine get_data
 ! Calculate the distance from location pair (X1,Y1) to (X2,Y2) in kilometers
 !*******************************************************************************
 subroutine geographic_distance(X1,Y1,X2,Y2,DISTANCE)
+#ifdef LIBM_LLVM_COMPAT
+use libm_llvm_compat, only: cos => cosf_c, sin => sinf_c, acos => acosf_c, asin => asinf_c
+#endif
 
 real, intent(in) :: X1        ! Longitude of first station
 real, intent(in) :: Y1        ! Latitude of first station

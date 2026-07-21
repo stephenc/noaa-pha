@@ -32,6 +32,41 @@ else
   TF       =
 endif
 
+# --- Trig backend selection ---------------------------------------------------
+# NOAA's published GHCN-M v4 TOB was produced with classic ifort, which links
+# Intel's libimf; its float32 cosf/sinf/acosf/asinf differ from other libm on
+# ~1.6% of inputs (1 ULP), enough to flip TOB adjustments and PHA neighbour
+# selection at knife-edge cells.  TRIG_BACKEND selects how the float32 trig in
+# the TOB + PHA distance/solar code is provided:
+#
+#   standard    (default) gfortran intrinsics -> platform libm. Portable, but
+#               diverges from NOAA on 4 US stations / 136 months (<=0.01 C).
+#   llvm-exact LLVM-libc's correctly-rounded algorithm (Apache-2.0 public
+#               constants) + a 4-row cosf gate derived from NOAA public data,
+#               compiled as a deterministic C object (src/f95/libm_llvm_trig.c)
+#               and linked in. PORTABLE and bit-identical to NOAA across all
+#               12,781 US stations, on x86_64 and AArch64 alike. Redistributable.
+#                 make TRIG_BACKEND=llvm-exact bin/TOBMain
+#   libimf      Link Intel's libimf directly (x86 only); requires libimf on the
+#               library path.   make TRIG_BACKEND=libimf bin/TOBMain
+#
+# Orthogonal: FC=ifort / FC=ifx use Intel's compiler (and its built-in libimf)
+# directly -- NOAA's own reference toolchain (x86 only).
+CC ?= cc
+CFLAGS_TRIG ?= -O2
+TRIG_BACKEND ?= standard
+EXTRA_LINK_OBJS =
+LDFLAGS_TRIG =
+ifeq ($(TRIG_BACKEND),llvm-exact)
+  F95FLAGS += -DLIBM_LLVM_COMPAT
+  EXTRA_LINK_OBJS += $(ABS_OBJ_DIR)/libm_llvm_trig.o
+  LDFLAGS_TRIG += -lm
+else ifeq ($(TRIG_BACKEND),libimf)
+  LDFLAGS_TRIG += -limf
+else ifneq ($(TRIG_BACKEND),standard)
+  $(error Unknown TRIG_BACKEND '$(TRIG_BACKEND)' (use: standard | llvm-exact | libimf))
+endif
+
 # Directories (use absolute paths internally for robustness, though not strictly required)
 # CURDIR is a Make built-in variable representing the current working directory.
 # Using $(CURDIR)/ ensures paths are absolute, reducing ambiguity.
@@ -121,6 +156,11 @@ $(ABS_BIN_DIR)/%: $(ABS_AWK_DIR)/%.awk | $(DIRS)
 # Quote paths for compiler arguments and automatic variables
 $(ABS_OBJ_DIR)/%.o: $(ABS_F77_DIR)/%.f | $(DIRS)
 	$(FC) $(FCFLAGS) $(F77FLAGS) -I"$(ABS_INC_DIR)" -c "$<" -o "$@"
+
+# Generic rule for C object files (deterministic llvm-exact trig backend).
+# Only exercised when TRIG_BACKEND=llvm-exact adds the object to a link line.
+$(ABS_OBJ_DIR)/%.o: $(ABS_F95_DIR)/%.c | $(DIRS)
+	$(CC) $(CFLAGS_TRIG) -c "$<" -o "$@"
 
 # Generic F95 rule is not used as specific rules are generated in deps.mk
 
