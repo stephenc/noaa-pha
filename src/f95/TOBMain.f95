@@ -39,6 +39,18 @@ program TOBMain
   ! ---------------------------------------------------------------------------
   integer, parameter :: MAX_CHANGES = 200
 
+  ! Contiguous-US (lower-48) bounding box.  The Karl et al. time-of-observation
+  ! reference-station calibration network is lower-48 only, so the bias table is
+  ! only meaningful inside this box.  NOAA's ushcn_tobs is fed a pre-filtered US
+  ! station list; our pipeline sees every GHCN-M station, so we filter here.
+  ! Bounds carry margin beyond the true extremes (lat 24.5..49.4, lon -124.8..
+  ! -66.9) so no genuine lower-48 station is clipped, while Alaska, Hawaii and
+  ! all foreign stations fall outside.
+  real, parameter :: CONUS_LAT_MIN = 23.0
+  real, parameter :: CONUS_LAT_MAX = 50.0
+  real, parameter :: CONUS_LON_MIN = -126.0
+  real, parameter :: CONUS_LON_MAX = -65.0
+
   ! ---------------------------------------------------------------------------
   ! Program-level variables (accessed by contained procedures via host
   ! association — do NOT duplicate these names as dummy arguments in any
@@ -247,16 +259,31 @@ program TOBMain
     end if
 
     ! -----------------------------------------------------------------------
-    ! 5f. Time-zone check (contiguous US only)
+    ! 5f. Restrict TOB to the contiguous US (lower 48)
     ! -----------------------------------------------------------------------
-    itz = get_timezone(lon)
-    if (itz < 1 .or. itz > 4) then
+    ! TOB is a US-only correction; NOAA's ushcn_tobs is fed a pre-filtered US
+    ! station list, but our pipeline sees every GHCN-M station.  The old
+    ! get_timezone() guard was a no-op (its else-branch returns itz=1 for every
+    ! longitude east of -86 deg), so foreign, Alaskan and Hawaiian stations were
+    ! run through the Karl et al. algorithm with no valid lower-48 reference
+    ! network, producing garbage adjustments (i6 overflow -> "******" on write).
+    !
+    ! Filter on the GHCN-M FIPS country code (chars 1-2): only "US" stations are
+    ! TOB candidates.  A geographic box alone cannot do this -- northern Mexico
+    ! ("MX", lat 23-28) and southern Quebec ("CA", lat 48-50) overlap the CONUS
+    ! latitudes.  The lat/lon box is still applied on top of the "US" prefix to
+    ! exclude Alaska and Hawaii, which share the "US" country code.
+    if (station_id(1:2) /= 'US' .or. &
+        lat < CONUS_LAT_MIN .or. lat > CONUS_LAT_MAX .or. &
+        lon < CONUS_LON_MIN .or. lon > CONUS_LON_MAX) then
       call log_warn("TOBMain: " // trim(station_id) // " — outside contiguous US; copied verbatim")
       call copy_file(input_file, output_file)
       if (allocated(values)) deallocate(values)
       if (allocated(flags))  deallocate(flags)
       cycle
     end if
+
+    itz = get_timezone(lon)
 
     ! -----------------------------------------------------------------------
     ! 5g. Finalise history: resolve special codes, set sentinel
