@@ -45,36 +45,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ghcn_io  # noqa: E402
 import his_emit  # noqa: E402
 import residual_solver as rs  # noqa: E402
+import tob_hints  # noqa: E402
 from tob_basis import BasisRunner  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
-# Data-root-dependent paths are module-level for historical reasons; the
-# --base CLI option (set_base) re-roots them so an alternate vintage
-# workspace (e.g. data-oldest/) can be solved standalone.
+# All data-root-dependent paths (inputs, outputs, AND derived state) live
+# under the --base workspace, so a run never writes outside its base dir.
+# Derived state -- solutions, basis cache -- lives under <base>/intermediate;
+# transient TOBMain scratch under <base>/scratch.  set_base re-roots them for
+# an alternate vintage (e.g. data-oldest/).
 RAW_DIR = REPO / "data" / "input" / "raw" / "tavg"
 QCF_DIR = REPO / "data" / "output" / "qcf" / "tavg"
 INV_PATH = REPO / "data" / "input" / "station.inv"
 TOB_BIN = REPO / "bin" / "TOBMain"
-CACHE_ROOT = REPO / "work" / "tob_basis"
-SCRATCH_ROOT = REPO / "work" / "tob_scratch"
-SOLUTIONS_DIR = REPO / "work" / "solutions"
+CACHE_ROOT = REPO / "data" / "intermediate" / "tob_basis"
+SCRATCH_ROOT = REPO / "data" / "scratch"
+SOLUTIONS_DIR = REPO / "data" / "intermediate" / "solutions"
+HINTS_DIR = REPO / "data" / "intermediate" / "hints"
 
 
-def set_base(base: Path, work_tag: str) -> None:
+def set_base(base: Path, work_tag: str = "") -> None:
     """Re-root all data-dependent paths at an alternate vintage workspace.
 
     base must contain input/raw/tavg, input/station.inv, output/qcf/tavg
     (as built by qcu_to_inputs.py/qcf_to_outputs.py --base).  Derived state
-    (basis cache, scratch, solutions) moves under work/<work_tag>/ so
-    vintages never share caches."""
+    (solutions, basis cache) goes under ``<base>/intermediate`` and transient
+    scratch under ``<base>/scratch`` so a run never writes outside its base
+    dir; different vintages never share caches.  ``work_tag`` is accepted for
+    backward compatibility but no longer used."""
     global RAW_DIR, QCF_DIR, INV_PATH, CACHE_ROOT, SCRATCH_ROOT, SOLUTIONS_DIR
+    global HINTS_DIR
     base = base.resolve()
     RAW_DIR = base / "input" / "raw" / "tavg"
     QCF_DIR = base / "output" / "qcf" / "tavg"
     INV_PATH = base / "input" / "station.inv"
-    CACHE_ROOT = REPO / "work" / work_tag / "tob_basis"
-    SCRATCH_ROOT = REPO / "work" / work_tag / "tob_scratch"
-    SOLUTIONS_DIR = REPO / "work" / work_tag / "solutions"
+    CACHE_ROOT = base / "intermediate" / "tob_basis"
+    SCRATCH_ROOT = base / "scratch"
+    SOLUTIONS_DIR = base / "intermediate" / "solutions"
+    HINTS_DIR = base / "intermediate" / "hints"
 
 
 def is_conus_gate(sid: str, lat: float, lon: float) -> bool:
@@ -123,41 +131,59 @@ HIATUS_MIN_MONTHS = (
 )
 
 
+def _edge_positions(raw_values, qcf_values, dataset_last):
+    """month-index -> partial-month label for record edges / hiatus / QCF
+    constraint-gap restarts / dataset-last (the positions where an isolated
+    deviant is a partial month, not real structure).
+
+    Two kinds of gap qualify: a HIATUS in the RAW record (no data at all for
+    >= HIATUS_MIN_MONTHS -- QC-flagged data counts as data), and a
+    QCF-CONSTRAINT gap (QCU present but QCF absent for >= HIATUS_MIN_MONTHS --
+    the residual solve has no anchor across it, so the month where constraints
+    resume is a restart edge)."""
+    out = {}  # mi -> label
+    # RAW hiatus first (no data at all is the stronger signal), then a
+    # QCF-constraint gap only where the raw record did not already flag one.
+    raw_mis = sorted(y * 12 + (m - 1) for (y, m) in raw_values)
+    for a, b in zip(raw_mis, raw_mis[1:]):
+        gap = b - a - 1
+        if gap >= HIATUS_MIN_MONTHS:
+            out[a] = f"hiatus-{gap}mo"
+            out[b] = f"hiatus-{gap}mo"
+    common = sorted(set(raw_values) & set(qcf_values))
+    if common:
+        cmis = [y * 12 + (m - 1) for (y, m) in common]
+        for a, b in zip(cmis, cmis[1:]):
+            gap = b - a - 1
+            if gap >= HIATUS_MIN_MONTHS:
+                out.setdefault(a, f"qcf-gap-{gap}mo")
+                out.setdefault(b, f"qcf-gap-{gap}mo")
+    if dataset_last is not None:
+        out.setdefault(dataset_last[0] * 12 + (dataset_last[1] - 1), "dataset-last")
+    return out
+
+
 def classify_partial_months(sol, raw_values, qcf_values, mshr_recs, dataset_last):
     """Partial-month exemption rule: relabel a deviant as
     'partial-month-evidence:<...>' ONLY with evidence -- (a) it is the
-    dataset-wide last month, (b) it is the station's record edge AND an
-    MSHR period boundary falls strictly inside that month, or (c) it is the
-    single month immediately BEFORE or AFTER a continuous hiatus of
-    >= HIATUS_MIN_MONTHS calendar months with zero data in the raw record
-    (a month present with any value, even QC-flagged, breaks the hiatus) --
-    the trailing/leading month of a collection stop/restart is typically a
-    partial month.  Everything else stays a regular deviant."""
+    dataset-wide last month, (b) it is the single month adjacent to a raw
+    hiatus or a QCF-constraint-gap restart of >= HIATUS_MIN_MONTHS months
+    (see ``_edge_positions``), or (c) it is the station's record edge AND an
+    MSHR period boundary falls strictly inside that month.  Everything else
+    stays a regular deviant."""
     if not sol.deviants:
         return
     common = sorted(set(raw_values) & set(qcf_values))
     if not common:
         return
     edges = {common[0], common[-1]}
-    # Hiatus adjacency computed on the RAW record: months with any value
-    # present (even QC-flagged) count as data.
-    raw_mis = sorted(y * 12 + (m - 1) for (y, m) in raw_values)
-    hiatus_adjacent = {}  # month-index -> gap length (calendar months)
-    for a, b in zip(raw_mis, raw_mis[1:]):
-        gap = b - a - 1
-        if gap >= HIATUS_MIN_MONTHS:
-            hiatus_adjacent[a] = gap  # single trailing month before the gap
-            hiatus_adjacent[b] = gap  # single leading month after the gap
+    positions = _edge_positions(raw_values, qcf_values, dataset_last)
     relabeled = []
     for ym, why in sol.deviants:
         ymt = tuple(ym)
         mi = ymt[0] * 12 + (ymt[1] - 1)
-        evidence = None
-        if dataset_last is not None and ymt == tuple(dataset_last):
-            evidence = "dataset-last"
-        elif mi in hiatus_adjacent:
-            evidence = f"hiatus-{hiatus_adjacent[mi]}mo"
-        elif ymt in edges:
+        evidence = positions.get(mi)
+        if evidence is None and ymt in edges:
             for rec in mshr_recs or []:
                 for b in (rec.begin, rec.end):
                     if (
@@ -209,6 +235,22 @@ def solve_station(
     # across both data vintages).  MSHR data is used only for partial-month
     # evidence classification.
     coords, prov = [(inv.lat, inv.lon)], ["inventory"]
+    inv_bases = None  # chosen-coord bases, when the TOB gate ran (for §6.4)
+
+    # Donor hints (loaded once, reused for consolidation).  By default (Phase
+    # 2, §9) they also influence the SOLVE via vintage_hints; --no-vintage-hints
+    # restores v1 behaviour (consolidation only, outside the QCF hull).
+    hint_sets = []
+    if _HINT_DIRS and conus:
+        hint_sets = tob_hints.load_hint_sets(
+            _HINT_DIRS, sid, solver_version=rs.SOLVER_EVIDENCE_VERSION, log=print
+        )
+    vintage_hints = (
+        tob_hints.vintage_hints_from_sets(hint_sets)
+        if (_VINTAGE_HINTS_ON and hint_sets)
+        else None
+    )
+
     if conus and not pha_fast_path_ok(sol):
         runner = BasisRunner(TOB_BIN, SCRATCH_ROOT, CACHE_ROOT)
 
@@ -244,6 +286,12 @@ def solve_station(
         # When that basis is unusable (e.g. mict<5), the solver still runs
         # so it produces its no-solution reading.
         inv_bases = runner.get_bases(sid, raw_path, coords)
+        # Record-edge / hiatus / QCF-constraint-gap positions where a lone
+        # deviant is a partial month, not real structure -- lets the solver
+        # prefer an edge deviant over a short obs-time flip at a restart.
+        edge_mis = frozenset(
+            _edge_positions(raw.values, qcf.values, _DATASET_LAST)
+        )
         tob_sol = rs.solve_tob_station(
             raw.values,
             qcf.values,
@@ -252,6 +300,8 @@ def solve_station(
             qcf.flags,
             sid=sid,
             hints=hints,
+            vintage_hints=vintage_hints,
+            edge_mis=edge_mis,
         )
         if prefer_tob(sol, tob_sol):
             sol = tob_sol
@@ -279,6 +329,64 @@ def solve_station(
     d = sol.to_dict()
     d["coord"] = list(chosen_coord)
     d["coord_provenance"] = chosen_prov
+
+    # Evidence export (§4.6): derived from the PURE residual solve, before any
+    # consolidation.  CONUS stations (TOB and pha-only) get a hints file; the
+    # class is computed here from the post-relabel deviants (classify_partial_
+    # months has already run).  --no-hints-out suppresses this.
+    if conus and not _NO_HINTS_OUT:
+        hints_obj = tob_hints.hints_from_solution(
+            sid, d, raw.values, qcf.values, base_name=_BASE_NAME, stamp=_RUN_STAMP
+        )
+        tob_hints.write_station_hints(HINTS_DIR, hints_obj)
+
+    # Consolidation (§6.6): extend the timeline with donor hints outside the
+    # QCF hull.  Runs only with --hints, on CONUS stations, and never touches
+    # the pure residual solve (hints already exported above).  Promotion of an
+    # exact pha-only station is flag-gated and re-kinds the LOCAL `kind` so the
+    # emission gate + summary see "tob".
+    if _HINT_DIRS and conus:
+        # hint_sets already loaded before the solve (reused here).
+        eligible = kind == "tob" or (
+            kind == "pha-only" and sol.exact and _PROMOTE_PHA_ONLY
+        )
+        if hint_sets and eligible:
+            cur_offsets = None
+            try:
+                if inv_bases and ci < len(inv_bases):
+                    cur_offsets = inv_bases[ci].code_offsets_by_ym
+                else:
+                    _r = BasisRunner(TOB_BIN, SCRATCH_ROOT, CACHE_ROOT)
+                    _b = _r.get_bases(sid, raw_path, [chosen_coord])
+                    cur_offsets = _b[0].code_offsets_by_ym if _b else None
+            except Exception:  # pragma: no cover - basis unavailable
+                cur_offsets = None
+            cons = tob_hints.consolidate(
+                d["regimes"],
+                kind,
+                hint_sets,
+                raw.values,
+                qcf.values,
+                current_offsets=cur_offsets,
+                promote_pha_only=_PROMOTE_PHA_ONLY,
+            )
+            if cons.adopted_pre or cons.adopted_post:
+                d["residual_regimes"] = d["regimes"]  # pure solve preserved
+                d["regimes"] = cons.regimes  # consolidated plain dicts
+                d["audits"].append(
+                    f"hints-consolidated:pre={cons.adopted_pre},"
+                    f"post={cons.adopted_post}"
+                )
+                d["hint_consolidation"] = {
+                    "source_kind": kind,  # pre-promotion kind (for idempotent recompute)
+                    "notes": cons.notes,
+                    "refusals": cons.refusals,
+                }
+                if cons.promoted:
+                    d["kind"] = "tob"
+                    kind = "tob"  # LOCAL: gates emission + summary below
+                    d["audits"].append("hint-promoted-pha-only")
+
     with open(SOLUTIONS_DIR / f"{sid}.json", "w") as fh:
         json.dump(d, fh, indent=1)
 
@@ -293,10 +401,15 @@ def solve_station(
     # (documented locations/elevations/obs times); TOBMain verbatim-copies
     # them regardless, so TOB outputs are unaffected -- the rows exist for
     # PHA's documented-changepoint reader.
-    if emit_his and conus and kind == "tob" and sol.regimes:
+    if emit_his and conus and kind == "tob" and d["regimes"]:
         out_dir = his_dir or (REPO / "work" / "history")
         first_year = raw.years[0] if raw.years else 1895
-        regimes = [his_emit.Regime(begin=r.begin, obs_time=r.code) for r in sol.regimes]
+        # Build from d["regimes"] (dicts): after consolidation/promotion these
+        # are the consolidated timeline, NOT sol.regimes (§6.6).
+        regimes = [
+            his_emit.Regime(begin=tuple(r["begin"]), obs_time=r["code"])
+            for r in d["regimes"]
+        ]
         dms = ghcn_io.dms_quantize(*chosen_coord)
         his_emit.emit_station_his(sid, regimes, dms, inv, out_dir, first_year)
     elif emit_his and not conus:
@@ -313,7 +426,7 @@ def solve_station(
                 first_data=min(raw.values) if raw.values else None,
             )
 
-    n_reg = len(sol.regimes)
+    n_reg = len(d["regimes"])
     n_cp = max(0, len(sol.segments) - 1)
     summary = (
         f"{sid}\t{kind}\texact={sol.exact}\tregimes={n_reg}\tcps={n_cp}"
@@ -326,6 +439,16 @@ _INV_CACHE = None
 _MSHR_CACHE: Optional[dict] = None
 _PHR_CACHE: Optional[dict] = None
 _DATASET_LAST: Optional[Tuple[int, int]] = None
+# Set in main() before the fork pool; inherited copy-on-write by workers.
+_NO_HINTS_OUT: bool = False
+_BASE_NAME: str = "data"
+_RUN_STAMP: str = ""
+# Consolidation (Stage 4): donor hint dirs (--hints) and pha-only promotion.
+_HINT_DIRS: List[Path] = []
+_PROMOTE_PHA_ONLY: bool = False
+# Phase 2 (§9): let donor hints influence the SOLVE.  ON by default when
+# --hints is given; disabled with --no-vintage-hints.
+_VINTAGE_HINTS_ON: bool = True
 
 
 def _dataset_last_month(qcf_dir: Path, sample: int = 40) -> Optional[Tuple[int, int]]:
@@ -447,16 +570,53 @@ def main() -> None:
         "interrupted batch; only sound when the existing solutions come "
         "from the same solver version and workspace)",
     )
+    ap.add_argument(
+        "--hints",
+        action="append",
+        default=None,
+        metavar="DIR",
+        help="donor hints directory to CONSOLIDATE from (repeatable, e.g. "
+        "data-oldest/intermediate/hints); extends timelines OUTSIDE this "
+        "vintage's QCF hull only -- the solve is never hint-influenced in v1",
+    )
+    ap.add_argument(
+        "--promote-pha-only",
+        action="store_true",
+        help="allow a CONUS exact pha-only station with adoptable exterior "
+        "hint regimes to emit a 24HR-hull + exteriors timeline (re-kinded "
+        "'tob'); default off (emitting any .his reverses a driver policy)",
+    )
+    ap.add_argument(
+        "--no-hints-out",
+        action="store_true",
+        help="suppress writing this run's own hints files "
+        "(<base>/intermediate/hints)",
+    )
+    ap.add_argument(
+        "--no-vintage-hints",
+        action="store_true",
+        help="Phase 2 (§9) is ON by default when --hints is given: donor "
+        "hints INFLUENCE the solve (enumeration preference + hinted-boundary "
+        "retry), and policy adoptions export as class residual-proven-hinted "
+        "(never re-adoptable).  Pass this flag to disable it (v1 behaviour: "
+        "hints act only at consolidation, outside the QCF hull)",
+    )
     args = ap.parse_args()
+
+    # --skip-existing resumes skip solve_station entirely, so consolidation
+    # would produce mixed outputs; refuse the combination (§6.6).
+    if args.skip_existing and args.hints:
+        ap.error("--skip-existing is incompatible with --hints")
 
     base = Path(args.base)
     tag = base.name
-    if base.resolve() != (REPO / "data").resolve():
-        set_base(base, tag)
+    # Always re-root under base (incl. base=data) so nothing is written
+    # outside the base dir on any invocation.
+    set_base(base, tag)
     if args.his_dir is None:
         args.his_dir = str(base / "intermediate" / "history")
     if args.summary_file is None:
-        args.summary_file = str(REPO / "work" / tag / "summary.tsv")
+        args.summary_file = str(base / "intermediate" / "summary.tsv")
     if args.mshr_zip is None and (base / "mshr_enhanced.txt.zip").exists():
         args.mshr_zip = str(base / "mshr_enhanced.txt.zip")
     if args.phr_zip is None and (base / "phr.txt.zip").exists():
@@ -490,6 +650,41 @@ def main() -> None:
             f"# resume: skipping {before - len(stations)} existing solutions",
             flush=True,
         )
+    # Hints export + consolidation config, set before the fork pool so
+    # workers inherit it copy-on-write (like the PHR/MSHR caches).
+    global _NO_HINTS_OUT, _BASE_NAME, _RUN_STAMP, _HINT_DIRS, _PROMOTE_PHA_ONLY
+    global _VINTAGE_HINTS_ON
+    _NO_HINTS_OUT = args.no_hints_out
+    _BASE_NAME = tag
+    _PROMOTE_PHA_ONLY = args.promote_pha_only
+    _VINTAGE_HINTS_ON = not args.no_vintage_hints
+    import datetime as _dt
+
+    _RUN_STAMP = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not _NO_HINTS_OUT:
+        HINTS_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"# hints out: {HINTS_DIR}", flush=True)
+    if args.hints:
+        active = HINTS_DIR.resolve()
+        hint_dirs: List[Path] = []
+        for h in args.hints:
+            hp = Path(h).resolve()
+            if hp == active:
+                ap.error(
+                    f"--hints {h} resolves to this run's own hints dir "
+                    "(self-hints forbidden: output must be a pure function of "
+                    "the workspace + DONOR hints)"
+                )
+            if not hp.is_dir():
+                ap.error(f"--hints {h}: not a directory")
+            hint_dirs.append(hp)
+        _HINT_DIRS = hint_dirs
+        print(
+            f"# consolidation: {len(_HINT_DIRS)} hint dir(s); "
+            f"promote_pha_only={_PROMOTE_PHA_ONLY}",
+            flush=True,
+        )
+
     global _DATASET_LAST
     _DATASET_LAST = _dataset_last_month(QCF_DIR)
     if args.phr_zip:

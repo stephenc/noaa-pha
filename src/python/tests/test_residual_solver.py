@@ -875,7 +875,7 @@ class TestMagnitudeTieBreak(unittest.TestCase):
             check=True,
             capture_output=True,
         )
-        sol = json.load(open("work/solutions/USC00012727.json"))
+        sol = json.load(open("data/intermediate/solutions/USC00012727.json"))
         b1962 = [r for r in sol["regimes"] if r["begin"][0] == 1962]
         self.assertEqual(len(b1962), 1)
         # PHR documents 06HR->07HR at 1962-05-04; June 1962 QCF is deleted,
@@ -1030,6 +1030,339 @@ class TestIfortBasisErrorStability(unittest.TestCase):
         self.assertIn("14HR", {r.code for r in hinted.regimes})
         self.assertTrue(hinted.exact)
         self.assertEqual(hinted.deviants, [])
+
+
+class TestEvidenceCapture(unittest.TestCase):
+    """§10.5 -- evidence attaches on every return path; determinism preserved."""
+
+    def _clean_exact_tob(self):
+        yms = month_range(1950, 1, 2009, 12)
+        s_era = fp32.f32(-0.30)
+        qcu, qcf = synth(70, yms, lambda y, m: OFF_17[m], lambda y, m: s_era)
+        basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNEV1")
+        self.assertTrue(sol.exact)
+        return sol
+
+    def test_evidence_attached_on_clean_exact_tob(self):
+        sol = self._clean_exact_tob()
+        self.assertIsNotNone(sol.evidence, "clean-exact early return must carry evidence")
+        ev = sol.evidence
+        self.assertEqual(ev["kind"], "tob")
+        self.assertEqual(ev["solver_version"], rs.SOLVER_EVIDENCE_VERSION)
+        self.assertEqual(len(ev["regimes"]), 1)
+        r = ev["regimes"][0]
+        self.assertEqual(r["code"], "17HR")
+        self.assertIn("17HR", r["ambiguous_codes"])
+        self.assertEqual(r["boundary"]["kind"], "record-start")
+        # Full-record single regime, no holes -> one run, coverage = all months.
+        self.assertEqual(len(ev["evidence_runs"]), 1)
+        self.assertEqual(r["n_constrained"], 720)
+        self.assertEqual(len(r["constrained_runs"]), 1)
+
+    def test_to_dict_is_additive_only(self):
+        sol = self._clean_exact_tob()
+        d = sol.to_dict()
+        self.assertIn("evidence", d)
+        without = {k: v for k, v in d.items() if k != "evidence"}
+        sol.evidence = None
+        self.assertEqual(sol.to_dict(), without)
+
+    def test_evidence_holes_visible(self):
+        # Two regimes with a data hole inside the first -> constrained_runs
+        # of the first regime split around the hole.
+        yms = [
+            ym
+            for ym in month_range(1950, 1, 1979, 12)
+            if not ((1960, 1) <= ym <= (1961, 12))  # 2-year hole
+        ] + month_range(1980, 1, 1999, 12)
+        s_era = fp32.f32(-0.30)
+
+        def tobo_fn(y, m):
+            return OFF_17[m] if (y, m) < (1980, 1) else OFF_07[m]
+
+        qcu, qcf = synth(71, yms, tobo_fn, lambda y, m: s_era)
+        basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNEV2")
+        self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
+        ev = sol.evidence
+        self.assertEqual([r["code"] for r in ev["regimes"]], ["17HR", "07HR"])
+        first = ev["regimes"][0]
+        self.assertEqual(len(first["constrained_runs"]), 2, first["constrained_runs"])
+        # The second regime begins right after the first's last constraint.
+        self.assertEqual(ev["regimes"][1]["boundary"]["kind"], "constrained")
+
+    def test_pha_only_evidence_normal(self):
+        yms = month_range(1950, 1, 2009, 12)
+        s_old = fp32.f32(-0.42)
+        s_fn = lambda y, m: s_old if (y, m) < (1980, 1) else 0.0  # noqa: E731
+        qcu, qcf = synth(72, yms, lambda y, m: 0, s_fn)
+        sol = rs.solve_pha_only(qcu, qcf, sid="SYNEVP")
+        self.assertIsNotNone(sol.evidence)
+        ev = sol.evidence
+        self.assertEqual(ev["kind"], "pha-only")
+        self.assertEqual(len(ev["regimes"]), 1)
+        r = ev["regimes"][0]
+        self.assertEqual(r["code"], "24HR")
+        self.assertEqual(r["ambiguous_codes"], ["24HR", "00HR"])
+        self.assertEqual(tuple(r["begin"]), (1950, 1, 1))
+
+    def test_pha_only_evidence_empty_and_infeasible_paths(self):
+        # Empty common months -> no-common-months return still carries evidence.
+        sol = rs.solve_pha_only({(1950, 1): 10}, {}, sid="SYNEVE")
+        self.assertIsNotNone(sol.evidence)
+        self.assertEqual(sol.evidence["kind"], "pha-only")
+        self.assertEqual(sol.evidence["regimes"], [])
+
+    def test_resolve_blend_ab_returns_identical_day(self):
+        import types
+
+        months = [rs._mi(1990, 1), rs._mi(1990, 2), rs._mi(1990, 3)]
+        q1 = fp32.pha_qcf(100, 0.0)
+        series = rs.Series(
+            sid="B",
+            months=months,
+            t_raw=[100, 100, 100],
+            q=[q1, q1, q1],
+            qcf_only=[],
+            visible=set(),
+            visible_sorted=[],
+        )
+        seg = types.SimpleNamespace(idxs=[0, 1, 2], iv=rs.FULL)
+        basis = types.SimpleNamespace(coord=(40.0, -90.0))
+
+        def blend_fn(coord, ym, c_old, c_new):
+            table = {}
+            for d in range(2, 29):
+                table[d] = {ym: 0} if d in (5, 9) else {}
+            return table
+
+        day_a = rs._resolve_blend(series, basis, 1, "24HR", "07HR", [seg], blend_fn)
+        feas = []
+        day_b = rs._resolve_blend(
+            series, basis, 1, "24HR", "07HR", [seg], blend_fn, collect_days=feas
+        )
+        self.assertEqual(day_a, day_b)
+        self.assertEqual(day_a, 5)
+        self.assertEqual(feas, [5, 9])
+        self.assertEqual(feas[0], day_a)
+
+
+class TestPhase2VintageHints(unittest.TestCase):
+    """§9 -- vintage-hint influence, laundering guard, retry."""
+
+    def _mk_sol(self, regimes, cost, deviants=(), stats=None):
+        return rs.Solution(
+            "SYN", "tob", 0,
+            [rs.RegimeOut(b, None, c, bd) for (b, c, bd) in regimes],
+            [], list(deviants), [], [], tuple(cost), not deviants,
+            stats=dict(stats or {}),
+        )
+
+    def test_select_strict_improvement_keeps_natural(self):
+        base = self._mk_sol([((1950, 1, 1), "17HR", None)], (0, 1, 0, 1, 0, 0),
+                            deviants=[((1960, 6), "unexplained")])
+        hinted = self._mk_sol([((1950, 1, 1), "17HR", None)], (0, 0, 0, 1, 0, 0))
+        out = rs._select_hint_influenced(base, hinted)
+        self.assertIs(out, hinted)
+        self.assertIsNone(out.hint_influenced)  # strict -> natural class
+        self.assertIn("vintage-hint-strict-improvement", out.audits)
+
+    def test_select_equal_rank_different_is_policy(self):
+        base = self._mk_sol(
+            [((1950, 1, 1), "17HR", None), ((1970, 1, 1), "07HR", None)],
+            (0, 0, 0, 2, 0, 0),
+        )
+        hinted = self._mk_sol(
+            [((1950, 1, 1), "17HR", None), ((1970, 1, 1), "12HR", None)],
+            (0, 0, 0, 2, 0, 0),
+        )
+        out = rs._select_hint_influenced(base, hinted)
+        self.assertIs(out, hinted)
+        self.assertEqual(out.hint_influenced, {(1970, 1, 1)})  # only the differ
+        self.assertIn("vintage-hint-policy-adoption", out.audits)
+
+    def test_select_equal_rank_identical_keeps_base(self):
+        regs = [((1950, 1, 1), "17HR", None)]
+        base = self._mk_sol(regs, (0, 0, 0, 1, 0, 0))
+        hinted = self._mk_sol(regs, (0, 0, 0, 1, 0, 0))
+        out = rs._select_hint_influenced(base, hinted)
+        self.assertIs(out, base)
+
+    def test_select_never_worse(self):
+        base = self._mk_sol([((1950, 1, 1), "17HR", None)], (0, 0, 0, 1, 0, 0))
+        hinted = self._mk_sol([((1950, 1, 1), "07HR", None)], (0, 2, 0, 1, 0, 0),
+                              deviants=[((1955, 1), "unexplained")])
+        out = rs._select_hint_influenced(base, hinted)
+        self.assertIs(out, base)
+
+    def test_zero_regression_vintage_hints_none(self):
+        yms = month_range(1950, 1, 2009, 12)
+        s_era = fp32.f32(-0.30)
+        qcu, qcf = synth(80, yms, lambda y, m: OFF_17[m], lambda y, m: s_era)
+        basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
+        a = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNZR")
+        b = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNZR", vintage_hints=[])
+        da, db = a.to_dict(), b.to_dict()
+        da.pop("evidence", None)
+        db.pop("evidence", None)
+        self.assertEqual(da, db)
+
+    def test_vintage_hint_matching_reading_no_influence(self):
+        # Vintage hint that matches the reading the base already finds must
+        # not mark anything (equal rank, identical structure).
+        yms = month_range(1950, 1, 2009, 12)
+        s_era = fp32.f32(-0.30)
+
+        def tobo_fn(y, m):
+            return OFF_17[m] if (y, m) < (1980, 1) else OFF_07[m]
+
+        qcu, qcf = synth(81, yms, tobo_fn, lambda y, m: s_era)
+        basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
+        base = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNVM")
+        self.assertEqual([r.code for r in base.regimes], ["17HR", "07HR"])
+        vh = [((1980, 1, 1), "07HR")]  # matches the true boundary/code
+        out = rs.solve_tob_station(
+            qcu, qcf, [basis], None, sid="SYNVM", vintage_hints=vh
+        )
+        self.assertEqual([r.code for r in out.regimes], ["17HR", "07HR"])
+        self.assertIsNone(out.hint_influenced)  # no tie was tipped
+
+    def test_repackage_incumbent_round_trip(self):
+        # §9.4 reconstruction: repackaging a clean solution reproduces its
+        # regimes and deviant set (the skip-guard's precondition).
+        yms = month_range(1950, 1, 2009, 12)
+        s_era = fp32.f32(-0.30)
+
+        def tobo_fn(y, m):
+            return OFF_17[m] if (y, m) < (1980, 1) else OFF_07[m]
+
+        qcu, qcf = synth(82, yms, tobo_fn, lambda y, m: s_era)
+        basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
+        series = rs.prepare_series("SYNRP", qcu, qcf, None)
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNRP")
+        self.assertTrue(sol.exact)
+        repacked = rs._repackage_incumbent(series, basis, sol, [], None, "SYNRP")
+        self.assertIsNotNone(repacked)
+        self.assertEqual(
+            [(r.begin, r.code) for r in repacked.regimes],
+            [(r.begin, r.code) for r in sol.regimes],
+        )
+        self.assertEqual(rs._dev_month_set(repacked), rs._dev_month_set(sol))
+
+    def test_end_to_end_policy_adoption_and_demotion(self):
+        import tob_hints
+
+        # 17HR and 18HR share a SEASONAL (non-constant) winter pattern but
+        # differ in summer.  An older winter-only regime is offset-ambiguous
+        # between them; a vintage 18HR hint tips the equal-cost tie.
+        A = {1: -6, 2: -4, 3: -7, 4: -6, 5: -5, 6: -4,
+             7: -3, 8: -3, 9: -4, 10: -5, 11: -5, 12: -8}
+        B = dict(A)
+        B.update({6: -9, 7: -9, 8: -9})
+        yms = sorted(set(
+            [(y, m) for y in range(1950, 1970) for m in (12, 1, 2)]
+            + [(y, m) for y in range(1970, 2000) for m in range(1, 13)]
+        ))
+
+        def tobo(y, m):
+            return A[m] if y < 1970 else OFF_07[m]
+
+        qcu, qcf = synth(90, yms, tobo, lambda y, m: fp32.f32(-0.3))
+        basis = make_basis(yms, {"17HR": A, "18HR": B, "07HR": OFF_07, "24HR": OFF_24})
+
+        base = rs.solve_tob_station(qcu, qcf, [basis], None, sid="PA")
+        self.assertEqual([r.code for r in base.regimes], ["17HR", "07HR"])
+        self.assertIsNone(base.hint_influenced)
+
+        hinted = rs.solve_tob_station(
+            qcu, qcf, [basis], None, sid="PA", vintage_hints=[((1950, 1, 1), "18HR")]
+        )
+        self.assertEqual([r.code for r in hinted.regimes], ["18HR", "07HR"])
+        self.assertEqual(hinted.hint_influenced, {(1950, 1, 1)})
+        self.assertIn("vintage-hint-policy-adoption", hinted.audits)
+        # It is a POLICY adoption: equal rank, not strictly better.
+        self.assertEqual(rs._rank_key(base), rs._rank_key(hinted))
+
+        # Derivation demotes the tipped regime; the untouched 07HR stays natural.
+        h = tob_hints.hints_from_solution("PA", hinted.to_dict(), qcu, qcf, base_name="data")
+        by_code = {r.code: r.evidence.cls for r in h.regimes}
+        self.assertEqual(by_code["18HR"], "residual-proven-hinted")
+        self.assertEqual(by_code["07HR"], "residual-proven")
+
+    def test_deflip_noop_empty_edge_mis(self):
+        # edge_mis empty/None must be byte-identical (zero regression).
+        yms = month_range(1950, 1, 2009, 12)
+        s_era = fp32.f32(-0.30)
+
+        def tobo_fn(y, m):
+            return OFF_17[m] if (y, m) < (1980, 1) else OFF_07[m]
+
+        qcu, qcf = synth(84, yms, tobo_fn, lambda y, m: s_era)
+        basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
+        a = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNDF")
+        b = rs.solve_tob_station(
+            qcu, qcf, [basis], None, sid="SYNDF", edge_mis=frozenset()
+        )
+        da, db = a.to_dict(), b.to_dict()
+        da.pop("evidence", None)
+        db.pop("evidence", None)
+        self.assertEqual(da, db)
+
+    def test_retry_noop_without_applicable_hint(self):
+        yms = month_range(1950, 1, 2009, 12)
+        s_era = fp32.f32(-0.30)
+        qcu, qcf = synth(83, yms, lambda y, m: OFF_17[m], lambda y, m: s_era)
+        basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
+        series = rs.prepare_series("SYNNO", qcu, qcf, None)
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNNO")
+        # A hint far from any boundary/deviant -> retry returns the incumbent.
+        out = rs._hinted_boundary_retry(
+            series, basis, sol, [((1999, 1, 1), "07HR")], None, [], "SYNNO"
+        )
+        self.assertEqual(
+            [(r.begin, r.code) for r in out.regimes],
+            [(r.begin, r.code) for r in sol.regimes],
+        )
+
+
+class TestUSC00134063Deflip(unittest.TestCase):
+    """Guarded real-data: the 1988-06 short flip at a QCF-gap restart is
+    dissolved into 24HR with an exempt partial-month deviant (§ user report)."""
+
+    def test_deflip_1988_06(self):
+        import os
+
+        if not (
+            os.path.exists("data/input/raw/tavg/USC00134063.raw.tavg")
+            and os.path.exists("bin/TOBMain")
+        ):
+            self.skipTest("real data not present")
+        import json
+        import subprocess
+
+        subprocess.run(
+            ["python3", "src/python/reconstruct_his.py", "--stations",
+             "USC00134063", "--no-emit"],
+            check=True, capture_output=True,
+        )
+        sol = json.load(open("data/intermediate/solutions/USC00134063.json"))
+        codes_1988 = [
+            (r["code"], tuple(r["begin"]))
+            for r in sol["regimes"]
+            if r["begin"][0] == 1988 and r["begin"][1] == 6
+        ]
+        # No 07HR flip beginning 1988-06 any more.
+        self.assertNotIn(("07HR", (1988, 6, 1)), codes_1988)
+        self.assertTrue(any("deflip-edge@1988-06" in a for a in sol["audits"]))
+        # 1988-06 exempted as a QCF-gap partial month.
+        self.assertTrue(
+            any(
+                tuple(ym) == (1988, 6) and "qcf-gap" in why
+                for ym, why in sol["deviants"]
+            ),
+            sol["deviants"],
+        )
 
 
 if __name__ == "__main__":

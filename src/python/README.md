@@ -55,6 +55,75 @@ They are **not** part of the original NOAA source-code tarball. Their purpose is
 - `metadata_accuracy.py` — scores PHR obs-time records against recovered
   timelines (analysis helper, not required for reconstruction).
 
+- `tob_hints.py` — cross-vintage TOB **evidence hints**: capture, I/O,
+  derivation, and consolidation (subsumes the former `merge_history.py`).
+
+### Cross-vintage TOB hints (evidence capture + consolidation)
+
+Every reconstruction run writes a per-station **hints** file to
+`<base>/intermediate/hints/<sid>.hints.json` recording *what the residual
+solve actually established* — constraint runs, per-regime coverage,
+offset-ambiguity sets, and boundary evidence (schema `tob-hints/1`).  These
+are a pure function of the residual solve (`--no-hints-out` suppresses them).
+
+When another QCF vintage covers years this base does not, consolidate its
+hints into this base's timeline — extending it **outside this vintage's QCF
+hull only** (the solve is never hint-influenced in v1):
+
+```bash
+uv run python src/python/reconstruct_his.py --base data \
+    --hints data-oldest/intermediate/hints
+```
+
+- **QCF hull is definitive** (first–last present QCF month, holes included);
+  in-hull months always follow the current solve — hints never fill holes.
+- **Pre-hull** `[first_qcu, qcf_first)` / **post-hull** `(qcf_last, last_qcu]`:
+  adopt the **primary** donor's adoptable regimes (class `residual-proven`
+  or `residual-ambiguous`, valid basis code, in-window begin).  Pad codes
+  (`00HR`/`24HR`) participate in precedence and, on winning, emit an explicit
+  `24HR` row.
+- **Precedence** per window: evidence class, then run-aware coverage, then
+  `--hints` order (later-listed wins full ties).  Incompatible evidence-backed
+  donors **conflict** and de-adopt each other; the rest stay eligible.
+- Mid-month begins (day > 15) take effect the following month (day-15 probe);
+  the written begin day is preserved.  **Boundary-crossing** begins are
+  **refused**, not clamped.  Everything is clamped to the **QCU data hull**.
+- `residual-ambiguous` adoption is checked against this vintage's basis over
+  the adoption window (`--current_offsets`); it is refused if the ambiguity
+  members' offsets diverge there.
+- `--promote-pha-only` (default off) lets an exact pha-only CONUS station with
+  adoptable exterior hints emit a `24HR`-hull + exteriors timeline.
+- `--skip-existing` is incompatible with `--hints`; a run refuses to consume
+  its own hints dir (donor hints only).
+
+To iterate on consolidation without re-solving (hours), or to backfill hints,
+use the consolidate-only CLI (reads stored solutions + hint dirs, re-emits
+`.his`; idempotent, TOBMain-free):
+
+```bash
+uv run python src/python/tob_hints.py consolidate --base data \
+    --hints data-oldest/intermediate/hints [--dry-run] [--promote-pha-only]
+uv run python src/python/tob_hints.py derive --base data   # (re)write hints
+```
+
+#### Phase 2: vintage hints influencing the solve (on by default; `--no-vintage-hints` to disable)
+
+By default, `--hints` both extends the timeline *outside* the QCF hull
+(consolidation) **and** lets donor evidence tip the **interior** solve — an
+enumeration preference toward documented codes at equal cost, plus a
+hinted-boundary retry that only accepts a *strictly* better (fewer-deviant)
+reading. Pass `--no-vintage-hints` to restrict `--hints` to consolidation only
+(the interior solve is then never hint-influenced).
+
+To keep the interior influence honest, the station is solved twice (with and
+without vintage hints) and compared by rank: a strict improvement keeps its
+natural class, but an equal-rank reading the hint merely *tipped* is a policy
+adoption — those regimes export as class `residual-proven-hinted` and are
+**never** re-adoptable downstream, so a donor's tie-break can never launder into
+this vintage's independent proof. The emitted `.his` is always a real,
+bit-exactly verifiable reading. Run the cross-vintage experiment both ways
+(`--no-vintage-hints` vs default) to measure it.
+
 ### Optional verification gate
 
 After TOBMain has been run over the emitted histories, you can optionally
@@ -65,8 +134,11 @@ uv run python src/python/verify_his.py --jobs 8
 ```
 
 Defaults assume the standard layout (`data/intermediate/tob/tavg`,
-`data/input/raw/tavg`, `data/output/qcf/tavg`, `work/solutions`). This step is
-**not** part of `quickstart_tob.sh`; run it when you want an end-to-end gate.
+`data/input/raw/tavg`, `data/output/qcf/tavg`, `data/intermediate/solutions`).
+All derived state (solutions, basis cache) lives under `<base>/intermediate`
+and transient scratch under `<base>/scratch`, so a run never writes outside its
+base dir. This step is **not** part of `quickstart_tob.sh`; run it when you want
+an end-to-end gate.
 
 ## Prerequisites
 

@@ -61,5 +61,43 @@ class TestHiatusRule(unittest.TestCase):
         self.assertEqual(out[0][1], "unexplained")
 
 
+class TestQcfConstraintGap(unittest.TestCase):
+    """A QCF-constraint gap (QCU present, QCF absent >= threshold) exempts the
+    restart month, even though the RAW record is continuous."""
+
+    def test_qcf_gap_restart_exempt(self):
+        from reconstruct_his import _edge_positions
+
+        # QCU continuous 1980-1990; QCF absent 1985-1986 (24-month gap).
+        raw = _vals([(y, m) for y in range(1980, 1991) for m in range(1, 13)])
+        qcf = _vals(
+            [(y, m) for y in range(1980, 1985) for m in range(1, 13)]
+            + [(y, m) for y in range(1987, 1991) for m in range(1, 13)]
+        )
+        pos = _edge_positions(raw, qcf, None)
+        mi_restart = 1987 * 12 + 0  # 1987-01
+        mi_last = 1984 * 12 + 11  # 1984-12
+        self.assertIn(mi_restart, pos)
+        self.assertTrue(pos[mi_restart].startswith("qcf-gap-"))
+        self.assertTrue(pos[mi_last].startswith("qcf-gap-"))
+        # A raw hiatus would still win the label where both apply.
+        raw2 = _vals(
+            [(y, m) for y in range(1980, 1985) for m in range(1, 13)]
+            + [(y, m) for y in range(1987, 1991) for m in range(1, 13)]
+        )
+        pos2 = _edge_positions(raw2, raw2, None)
+        self.assertTrue(pos2[mi_restart].startswith("hiatus-"))
+
+    def test_classify_relabels_qcf_gap(self):
+        raw = _vals([(y, m) for y in range(1980, 1991) for m in range(1, 13)])
+        qcf = _vals(
+            [(y, m) for y in range(1980, 1985) for m in range(1, 13)]
+            + [(y, m) for y in range(1987, 1991) for m in range(1, 13)]
+        )
+        shim = types.SimpleNamespace(deviants=[((1987, 1), "unexplained")])
+        classify_partial_months(shim, raw, qcf, [], None)
+        self.assertTrue(shim.deviants[0][1].startswith("partial-month-evidence:qcf-gap-"))
+
+
 if __name__ == "__main__":
     unittest.main()

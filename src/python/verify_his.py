@@ -47,11 +47,11 @@ REPO = Path(__file__).resolve().parents[2]
 DEF_TOB_DIR = REPO / "data" / "intermediate" / "tob" / "tavg"
 DEF_QCU_DIR = REPO / "data" / "input" / "raw" / "tavg"
 DEF_QCF_DIR = REPO / "data" / "output" / "qcf" / "tavg"
-DEF_SOLUTIONS = REPO / "work" / "solutions"
+DEF_SOLUTIONS = REPO / "data" / "intermediate" / "solutions"
 DEF_INV = REPO / "data" / "input" / "station.inv"
 DEF_TOB_BIN = REPO / "bin" / "TOBMain"
-DEF_CACHE = REPO / "work" / "tob_basis"
-DEF_SCRATCH = REPO / "work" / "tob_scratch"
+DEF_CACHE = REPO / "data" / "intermediate" / "tob_basis"
+DEF_SCRATCH = REPO / "data" / "scratch"
 
 MIN_SEG_VISIBLE = 18
 MISMATCH_SAMPLES = 3
@@ -318,7 +318,10 @@ def main() -> None:
     ap.add_argument("--qcf-dir", default=str(DEF_QCF_DIR))
     ap.add_argument("--solutions", default=str(DEF_SOLUTIONS))
     ap.add_argument("--inv", default=str(DEF_INV))
-    ap.add_argument("--report", default=str(REPO / "work" / "verification_report.tsv"))
+    ap.add_argument(
+        "--report",
+        default=str(REPO / "data" / "intermediate" / "verification_report.tsv"),
+    )
     ap.add_argument("--tob-bin", default=str(DEF_TOB_BIN))
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--stations", default=None, help="comma-separated subset")

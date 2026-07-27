@@ -69,6 +69,12 @@ PARETO_CAP = 24
 POP_BUDGET = 2_000_000
 NO_TOB_CODE = "24HR"
 
+# Evidence-schema version.  Bumped whenever solver changes could alter the
+# semantics of the evidence block attached to a Solution (constraint runs,
+# ambiguity sets, boundary kinds, feasible-day sets).  Written into every
+# hints file's provenance; the hint loader warns on mismatch (staleness).
+SOLVER_EVIDENCE_VERSION = 1
+
 # Tie-break preference: the empirically most common obs-time codes first,
 # then everything else stable.
 CODE_PREF = ["07HR", "17HR", "08HR", "18HR", "24HR", "06HR", "16HR"]
@@ -161,9 +167,15 @@ class Solution:
     cost: Tuple[int, int, int, int, int, int]
     exact: bool
     stats: Dict[str, object] = field(default_factory=dict)
+    evidence: Optional[dict] = None  # attached by the public solve wrappers
+    # Phase 2 (§9.1) laundering guard: begin-date tuples of regimes whose
+    # reading was a POLICY adoption (a vintage hint tipped an equal-rank tie).
+    # Such regimes export as class "residual-proven-hinted" -- never adoptable
+    # downstream.  Empty/None means no vintage-hint influence on structure.
+    hint_influenced: Optional[set] = None
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "station_id": self.station_id,
             "kind": self.kind,
             "coord_index": self.coord_index,
@@ -176,6 +188,9 @@ class Solution:
             "exact": self.exact,
             "stats": self.stats,
         }
+        if self.evidence is not None:
+            d["evidence"] = self.evidence
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -526,8 +541,19 @@ def solve_pha_only(
     qcf_flags: Optional[Dict[Tuple[int, int], str]] = None,
     sid: str = "",
 ) -> Solution:
-    """PHA-only decomposition (non-CONUS stations; CONUS fast path)."""
+    """PHA-only decomposition (non-CONUS stations; CONUS fast path).
+
+    Single-exit wrapper: ``_solve_pha_only_impl`` has several return points;
+    this wrapper attaches the pha-only evidence block (constraint runs plus a
+    single 24HR pseudo-regime, see the proposal §3.2) on the way out.
+    """
     series = prepare_series(sid, qcu, qcf, qcf_flags)
+    sol = _solve_pha_only_impl(series, sid)
+    sol.evidence = _pha_only_evidence(series, sol)
+    return sol
+
+
+def _solve_pha_only_impl(series: Series, sid: str) -> Solution:
     upfront = [(_ym(mi), "qcf-only-month") for mi in series.qcf_only]
     if not series.months:
         return Solution(
@@ -647,6 +673,234 @@ def _tobo_arrays(series: Series, basis) -> Dict[str, Optional[List[Optional[int]
     return out
 
 
+# ---------------------------------------------------------------------------
+# Evidence capture (see the proposal §4).  Pure read-out of what the solve
+# established -- no new search, no tolerances.  Class is NOT computed here; it
+# depends on post-relabel deviants and is finalized in tob_hints (§4.4).
+# ---------------------------------------------------------------------------
+
+
+def _runs_from_mis(mis: Sequence[int]) -> List[List[List[int]]]:
+    """Group ascending month indices into maximal calendar-contiguous runs.
+
+    Returns ``[[ [y,m], [y,m] ], ...]``; a gap (missing month, or an excluded
+    deviant/flutter/blend month left out of *mis*) breaks a run -- holes stay
+    visible, so a hole inside a regime is never "evidence-backed"."""
+    runs: List[List[List[int]]] = []
+    prev: Optional[int] = None
+    start: Optional[int] = None
+    for mi in mis:
+        if prev is None:
+            start = prev = mi
+        elif mi == prev + 1:
+            prev = mi
+        else:
+            y0, m0 = _ym(start)
+            y1, m1 = _ym(prev)
+            runs.append([[y0, m0], [y1, m1]])
+            start = prev = mi
+    if start is not None:
+        y0, m0 = _ym(start)
+        y1, m1 = _ym(prev)
+        runs.append([[y0, m0], [y1, m1]])
+    return runs
+
+
+def _deviant_flutter_mis(sol: Solution) -> Tuple[set, set]:
+    """(deviant month indices, flutter month indices) from a solution.
+
+    Deviant = the demoting labels (unexplained / blend-unresolved for TOB;
+    no-single-S / repair-merged for pha-only).  ``qcf-only-month`` months are
+    never constraint months (qcu absent), so they do not appear here."""
+    demoting = {"unexplained", "blend-unresolved", "no-single-S", "repair-merged"}
+    dev: set = set()
+    flut: set = set()
+    for ym, why in sol.deviants:
+        mi = _mi(ym[0], ym[1])
+        if why == "flutter":
+            flut.add(mi)
+        elif why in demoting:
+            dev.add(mi)
+    return dev, flut
+
+
+def _regime_begin_mi(reg: RegimeOut) -> int:
+    return _mi(reg.begin[0], reg.begin[1])
+
+
+def _blend_day_source(sol: Solution, bi: int) -> Tuple[str, Optional[List[int]]]:
+    """(day_source, feasible_days) for a resolved blend at constraint index bi."""
+    feas_map = sol.stats.get("blend_days_feasible") or {}
+    feas = feas_map.get(bi)
+    if feas is None:
+        # JSON round-trips int keys to strings; tolerate both.
+        feas = feas_map.get(str(bi))
+    if feas is not None:
+        return "search-blend", [int(d) for d in feas]
+    for a in sol.audits:
+        if "magnitude-refined" in a:
+            return "magnitude-refined", None
+    return "two-blend-repair", None
+
+
+def _solution_evidence(
+    series: Series,
+    tobos: Dict[str, Optional[List[Optional[int]]]],
+    sol: Solution,
+) -> dict:
+    """Evidence block for a TOB solution: constraint-month runs, per-regime
+    constrained runs / coverage, offset-identity ambiguity sets (deviant /
+    flutter / blend indices excluded), boundary kinds, and blend feasible-day
+    sets.  Entries carry their own begin date -- consumers align by begin, not
+    list position (§4.3)."""
+    months = series.months
+    n = len(months)
+    pos_of = {mi: i for i, mi in enumerate(months)}
+    dev_mis, flut_mis = _deviant_flutter_mis(sol)
+
+    regs = sol.regimes
+    begins = [_regime_begin_mi(r) for r in regs]
+
+    out_regimes: List[dict] = []
+    prev_last_mi: Optional[int] = None
+    for k, reg in enumerate(regs):
+        begin_mi = begins[k]
+        next_mi = begins[k + 1] if k + 1 < len(regs) else None
+        blend_mi = begin_mi if reg.blend_day else None
+        span_pos = [
+            i
+            for i in range(n)
+            if months[i] >= begin_mi and (next_mi is None or months[i] < next_mi)
+        ]
+        idxs = [
+            i
+            for i in span_pos
+            if months[i] not in dev_mis
+            and months[i] not in flut_mis
+            and months[i] != blend_mi
+        ]
+        idx_mis = [months[i] for i in idxs]
+        chosen = reg.code
+        chosen_arr = tobos.get(chosen)
+        if idxs and chosen_arr is not None:
+            amb = [
+                c
+                for c in sorted(tobos, key=_code_rank)
+                if tobos[c] is not None
+                and all(
+                    tobos[c][i] is not None and tobos[c][i] == chosen_arr[i]
+                    for i in idxs
+                )
+            ]
+        else:
+            amb = []
+        if chosen not in amb:
+            amb = [chosen] + amb
+
+        # Boundary kind for this begin.
+        if k == 0:
+            boundary = {
+                "kind": "record-start",
+                "gap_months_before": None,
+            }
+        elif prev_last_mi is not None and begin_mi == prev_last_mi + 1:
+            boundary = {"kind": "constrained", "gap_months_before": None}
+        elif prev_last_mi is not None:
+            boundary = {
+                "kind": "gap",
+                "gap_months_before": begin_mi - prev_last_mi - 1,
+            }
+        else:
+            boundary = {"kind": "gap", "gap_months_before": None}
+
+        if reg.blend_day:
+            src, feas = _blend_day_source(sol, pos_of.get(begin_mi, -1))
+            boundary["day_resolved"] = True
+            boundary["day_source"] = src
+            boundary["feasible_days"] = feas
+        else:
+            boundary["day_resolved"] = False
+            boundary["day_source"] = None
+            boundary["feasible_days"] = None
+
+        span_dev = sorted(
+            mi for mi in dev_mis if begin_mi <= mi and (next_mi is None or mi < next_mi)
+        )
+        span_flut = sorted(
+            mi for mi in flut_mis if begin_mi <= mi and (next_mi is None or mi < next_mi)
+        )
+        influenced = bool(sol.hint_influenced) and tuple(reg.begin) in sol.hint_influenced
+        out_regimes.append(
+            {
+                "begin": list(reg.begin),
+                "code": reg.code,
+                "blend_day": reg.blend_day,
+                "n_constrained": len(idxs),
+                "constrained_runs": _runs_from_mis(idx_mis),
+                "first_constrained": list(_ym(idx_mis[0])) if idx_mis else None,
+                "last_constrained": list(_ym(idx_mis[-1])) if idx_mis else None,
+                "ambiguous_codes": amb,
+                "flutter_months": [list(_ym(mi)) for mi in span_flut],
+                "deviant_months": [list(_ym(mi)) for mi in span_dev],
+                "boundary": boundary,
+                "hint_influenced": influenced,
+            }
+        )
+        if idx_mis:
+            prev_last_mi = idx_mis[-1]
+
+    return {
+        "solver_version": SOLVER_EVIDENCE_VERSION,
+        "kind": "tob",
+        "evidence_runs": _runs_from_mis(months),
+        "regimes": out_regimes,
+    }
+
+
+def _pha_only_evidence(series: Series, sol: Solution) -> dict:
+    """Evidence block for a pha-only solution: constraint runs plus a single
+    24HR pseudo-regime with ambiguity set {24HR, 00HR} (§3.2)."""
+    months = series.months
+    evidence_runs = _runs_from_mis(months)
+    if not months:
+        return {
+            "solver_version": SOLVER_EVIDENCE_VERSION,
+            "kind": "pha-only",
+            "evidence_runs": evidence_runs,
+            "regimes": [],
+        }
+    dev_mis, flut_mis = _deviant_flutter_mis(sol)
+    idx_mis = [mi for mi in months if mi not in dev_mis and mi not in flut_mis]
+    span_dev = sorted(dev_mis)
+    span_flut = sorted(flut_mis)
+    fy, fm = _ym(months[0])
+    regime = {
+        "begin": [fy, fm, 1],
+        "code": NO_TOB_CODE,  # 24HR: zero adjustment, proven over the span
+        "blend_day": None,
+        "n_constrained": len(idx_mis),
+        "constrained_runs": _runs_from_mis(idx_mis),
+        "first_constrained": list(_ym(idx_mis[0])) if idx_mis else None,
+        "last_constrained": list(_ym(idx_mis[-1])) if idx_mis else None,
+        "ambiguous_codes": ["24HR", "00HR"],
+        "flutter_months": [list(_ym(mi)) for mi in span_flut],
+        "deviant_months": [list(_ym(mi)) for mi in span_dev],
+        "boundary": {
+            "kind": "record-start",
+            "gap_months_before": None,
+            "day_resolved": False,
+            "day_source": None,
+            "feasible_days": None,
+        },
+    }
+    return {
+        "solver_version": SOLVER_EVIDENCE_VERSION,
+        "kind": "pha-only",
+        "evidence_runs": evidence_runs,
+        "regimes": [regime],
+    }
+
+
 @dataclass(order=True)
 class _State:
     cost: Tuple[int, int, int, int, int, int]
@@ -688,6 +942,7 @@ def _solve_with_basis(
     no_blend: bool = False,
     hint_mis: frozenset = frozenset(),
     flutter_as_deviant: bool = False,
+    hint_code_at: Optional[Dict[int, str]] = None,
 ) -> Optional[dict]:
     """Backward branch & bound for one coordinate basis.
 
@@ -696,10 +951,25 @@ def _solve_with_basis(
     solution carries blend-unresolved deviants: the search prices a blend as
     one cheap tob-change and cannot foresee resolution failure, which can
     shadow a genuine trial-regime reading, e.g. USC00049099).
+
+    hint_code_at (Phase 2 §9.3): {constraint index -> preferred switch-target
+    code}.  Because the heap orders by (cost, insertion order), enumerating
+    the hinted code FIRST in branch 2 prefers it among EQUAL-cost states -- a
+    tie-break in the absence of frontier eviction (under PARETO_CAP pressure
+    arrival order can also change evictions, so outcomes may differ beyond
+    ties).  Absent (None) => byte-identical enumeration order to before.
     """
     cap = cap or SEARCH_POP_CAP
     tobos = _tobo_arrays(series, basis)
     codes = sorted(tobos.keys(), key=_code_rank)
+
+    def _c2_order(i: int) -> List[str]:
+        if hint_code_at is None:
+            return codes
+        hc = hint_code_at.get(i)
+        if hc is None or hc not in tobos:
+            return codes
+        return [hc] + [c for c in codes if c != hc]
     n = len(series.months)
     if n == 0:
         return None
@@ -825,7 +1095,7 @@ def _solve_with_basis(
         # regimes of a few months survive: only <= FLIP_SPAN is penalized.
         short_reg = 1 if regime_span < MIN_REGIME_MONTHS else 0
         flip_pen = 1 if regime_span <= FLIP_SPAN else 0
-        for c2 in codes:
+        for c2 in _c2_order(i):
             if c2 == st.code:
                 continue
             off2 = tobos[c2][i]
@@ -1456,16 +1726,117 @@ def solve_tob_station(
     qcf_flags: Optional[Dict[Tuple[int, int], str]] = None,
     sid: str = "",
     hints: Optional[List[Tuple[Tuple[int, int, int], str]]] = None,
+    vintage_hints: Optional[List[Tuple[Tuple[int, int, int], str]]] = None,
+    edge_mis: Optional[frozenset] = None,
 ) -> Solution:
     """Full TOB+PHA decomposition; bases is a list of tob_basis.Basis.
 
     `hints` are PHR-documented (date, code) change events -- used only to
     RANK candidates (two-blend repair code ordering); never constraints, and
     solutions remain bit-exact regardless of hints.
+
+    `vintage_hints` (Phase 2, §9) are cross-vintage (date, code) events from a
+    donor's adoptable hint regimes.  They influence the solve (enumeration
+    preference §9.3, hint_mis merge, hinted-boundary retry §9.4).  To keep the
+    laundering guard (§9.1) exact, the station is solved TWICE -- once WITHOUT
+    vintage hints (the reference) and once WITH -- and the results compared by
+    rank: a strict improvement keeps its natural class; an equal-rank but
+    structurally different reading is a POLICY adoption whose differing regimes
+    are marked ``hint_influenced`` (exported as ``residual-proven-hinted``).
+    The solve is NEVER worse than the vintage-hint-free reference.
+
+    Public entry: a single-exit wrapper.  ``_solve_tob_station_impl`` runs the
+    search (it returns early on a clean-exact reading, so evidence capture
+    cannot live at the tail of the search body); this wrapper attaches the
+    evidence block from the chosen coordinate's basis on the way out.
     """
     series = prepare_series(sid, qcu, qcf, qcf_flags)
+    sol = _solve_tob_station_impl(series, bases, blend_fn, sid, hints, None, edge_mis)
+    if vintage_hints:
+        hinted = _solve_tob_station_impl(
+            series, bases, blend_fn, sid, hints, vintage_hints, edge_mis
+        )
+        sol = _select_hint_influenced(sol, hinted)
+    if sol.coord_index is not None:
+        sol.evidence = _solution_evidence(
+            series, _tobo_arrays(series, bases[sol.coord_index]), sol
+        )
+    return sol
+
+
+def _regime_signature(sol: Solution):
+    return tuple((tuple(r.begin), r.code, r.blend_day) for r in sol.regimes)
+
+
+def _select_hint_influenced(base: Solution, hinted: Solution) -> Solution:
+    """§9.1 laundering guard: choose between the vintage-hint-free reference
+    (`base`) and the vintage-hinted reading (`hinted`), marking policy
+    adoptions.  Never returns a reading worse than `base`."""
+    if hinted is None or hinted.coord_index is None:
+        return base
+    if base.coord_index is None:
+        hinted.hint_influenced = {tuple(r.begin) for r in hinted.regimes}
+        hinted.audits.append("vintage-hint-adopted")
+        return hinted
+    rb, rh = _rank_key(base), _rank_key(hinted)
+    if rh < rb:
+        # Strictly better: the data genuinely constrains this reading once the
+        # hint suggested trying it -- keep the natural class (§9.1).
+        hinted.audits.append("vintage-hint-strict-improvement")
+        return hinted
+    if rh > rb:
+        return base  # never regress below the reference
+    if _regime_signature(base) == _regime_signature(hinted):
+        return base  # equal rank, identical structure -> no influence
+    # Equal rank, different structure: a vintage hint tipped a tie (policy).
+    base_sig = {(tuple(r.begin), r.code, r.blend_day) for r in base.regimes}
+    hinted.hint_influenced = {
+        tuple(r.begin)
+        for r in hinted.regimes
+        if (tuple(r.begin), r.code, r.blend_day) not in base_sig
+    }
+    hinted.audits.append("vintage-hint-policy-adoption")
+    return hinted
+
+
+def _solve_tob_station_impl(
+    series: Series,
+    bases: Sequence,
+    blend_fn: Optional[Callable],
+    sid: str,
+    hints: Optional[List[Tuple[Tuple[int, int, int], str]]],
+    vintage_hints: Optional[List[Tuple[Tuple[int, int, int], str]]] = None,
+    edge_mis: Optional[frozenset] = None,
+) -> Solution:
     upfront = [(_ym(mi), "qcf-only-month") for mi in series.qcf_only]
-    hint_mis = frozenset(_mi(d[0], d[1]) for d, _c in (hints or []))
+    # §9.2: vintage hints merge into hint_mis and the tie-break machinery.
+    combined_hints = list(hints or []) + list(vintage_hints or [])
+    hint_mis = frozenset(_mi(d[0], d[1]) for d, _c in combined_hints)
+    # §9.3: enumeration preference.  A vintage hint (date D, code H) says H is
+    # active for months >= D.  In the BACKWARD search a switch to c2 at index i
+    # closes a regime covering months <= i, so H should be preferred as the
+    # switch target at every index i AT OR AFTER index(D) up to the next hint --
+    # a carry-forward preference.  It only tips EQUAL-cost states (the
+    # double-solve guard makes it safe); absent (no vintage hints) => None =>
+    # byte-identical enumeration order.
+    hint_code_at: Optional[Dict[int, str]] = None
+    if vintage_hints:
+        pos = {mi: i for i, mi in enumerate(series.months)}
+        idx_code = sorted(
+            (pos[_mi(d[0], d[1])], c)
+            for d, c in vintage_hints
+            if _mi(d[0], d[1]) in pos
+        )
+        if idx_code:
+            hint_code_at = {}
+            cur = None
+            j = 0
+            for i in range(len(series.months)):
+                while j < len(idx_code) and idx_code[j][0] <= i:
+                    cur = idx_code[j][1]
+                    j += 1
+                if cur is not None:
+                    hint_code_at[i] = cur
 
     # Phase 1: PLAIN attempts across ALL coordinates; phase 2: knife-edge
     # patched attempts.  Any plain-exact solution beats any patched-exact
@@ -1506,7 +1877,10 @@ def solve_tob_station(
         for seed_zero in (True, False):
             if pop_spent > POP_BUDGET and best_sol is not None:
                 return None
-            res = _solve_with_basis(series, use_basis, seed_zero, hint_mis=hint_mis)
+            res = _solve_with_basis(
+                series, use_basis, seed_zero, hint_mis=hint_mis,
+                hint_code_at=hint_code_at,
+            )
             deep = False
             if res is None and allow_deep:
                 # deep-search retry: rare many-changepoint stations need a
@@ -1517,6 +1891,7 @@ def solve_tob_station(
                     seed_zero,
                     cap=SEARCH_POP_CAP * 10,
                     hint_mis=hint_mis,
+                    hint_code_at=hint_code_at,
                 )
                 deep = res is not None
             if res is None:
@@ -1545,7 +1920,8 @@ def solve_tob_station(
                 # rerun without the blend branch -- a trial-regime reading
                 # the blend was shadowing may now win outright.
                 res2 = _solve_with_basis(
-                    series, use_basis, seed_zero, no_blend=True, hint_mis=hint_mis
+                    series, use_basis, seed_zero, no_blend=True, hint_mis=hint_mis,
+                    hint_code_at=hint_code_at,
                 )
                 if res2 is not None:
                     pop_spent += res2["pops"]
@@ -1758,13 +2134,34 @@ def solve_tob_station(
             blend_fn,
             upfront,
             sid,
-            hints=hints,
+            hints=combined_hints,
+        )
+    # Phase 2 (§9.4): hinted-boundary retry -- move a boundary onto a vintage
+    # hint's code/date when it strictly reduces deviants.  Strict-improvement
+    # only; the incumbent is repackaged through _package_solution for a fair
+    # like-for-like rank comparison.
+    if best_sol.coord_index is not None and blend_fn is not None and vintage_hints:
+        best_sol = _hinted_boundary_retry(
+            series,
+            bases[best_sol.coord_index],
+            best_sol,
+            vintage_hints,
+            blend_fn,
+            upfront,
+            sid,
         )
     # magnitude tie-break refinement of underdetermined boundaries (equal
-    # cost, smaller unexplained cents; PHR-hinted dates only)
-    if best_sol.coord_index is not None and blend_fn is not None and hints:
+    # cost, smaller unexplained cents; hinted dates only)
+    if best_sol.coord_index is not None and blend_fn is not None and combined_hints:
         best_sol = _boundary_magnitude_refine(
-            series, bases[best_sol.coord_index], best_sol, hints, blend_fn
+            series, bases[best_sol.coord_index], best_sol, combined_hints, blend_fn
+        )
+    # Prefer an edge deviant over a short obs-time flip at a record edge /
+    # hiatus / QCF-constraint-gap restart (physical parsimony over exactness).
+    if best_sol.coord_index is not None and blend_fn is not None and edge_mis:
+        best_sol = _deflip_short_edge_regimes(
+            series, bases[best_sol.coord_index], best_sol, edge_mis, upfront,
+            blend_fn, sid,
         )
     # Document compiler-divergence candidates on the PLAIN winner: the
     # patched reading is never emitted, but the evidence (a +-1 cell patch
@@ -2137,13 +2534,21 @@ def _package_solution(
     dev_all = sorted((dev_set | set(extra_devs)) - flutter_set - set(singleton_flut))
     flut_all = sorted(flutter_set | set(extra_flut) | set(singleton_flut))
 
-    # Blend resolution
+    # Blend resolution.  Collect the full feasible-day set per resolved blend
+    # constraint index so the winner's evidence can record it (the returned
+    # first day is unchanged by collection -- determinism preserved).
     regime_blend_days: Dict[int, int] = {}
     blend_deviants: List[int] = []
+    blend_days_feasible: Dict[int, List[int]] = {}
     for i, c_old, c_new in blends:
         day = None
         if blend_fn is not None:
-            day = _resolve_blend(series, basis, i, c_old, c_new, segs, blend_fn)
+            feas: List[int] = []
+            day = _resolve_blend(
+                series, basis, i, c_old, c_new, segs, blend_fn, collect_days=feas
+            )
+            if day is not None:
+                blend_days_feasible[i] = feas
         if day is None:
             blend_deviants.append(i)
         else:
@@ -2251,6 +2656,10 @@ def _package_solution(
         },
     )
     sol.stats["deviant_magnitude"] = _deviant_magnitude(series, basis, sol)
+    if blend_days_feasible:
+        # Keyed by resolved blend constraint index; rides on the winner so
+        # _solution_evidence can read the search-blend feasible-day sets.
+        sol.stats["blend_days_feasible"] = blend_days_feasible
     return sol
 
 
@@ -2350,10 +2759,23 @@ def _rank_key(sol: Solution):
 
 
 def _resolve_blend(
-    series: Series, basis, i: int, c_old: str, c_new: str, segs, blend_fn
+    series: Series,
+    basis,
+    i: int,
+    c_old: str,
+    c_new: str,
+    segs,
+    blend_fn,
+    collect_days: Optional[List[int]] = None,
 ) -> Optional[int]:
     """Find the switch day whose blended offset satisfies month i's constraint
-    within its PHA segment's interval."""
+    within its PHA segment's interval.
+
+    The return value (first feasible day, determinism preserved) is unchanged
+    by ``collect_days``.  When ``collect_days`` is given, the scan CONTINUES
+    past the first hit only to append every feasible day to it (evidence
+    capture); the first appended day equals the returned day.
+    """
     mi = series.months[i]
     y, m = _ym(mi)
     # Enclosing segment interval; when the blend month lies OUTSIDE every
@@ -2382,14 +2804,19 @@ def _resolve_blend(
         per_day = blend_fn(basis.coord, (y, m), c_old, c_new)
     except Exception:
         return None
+    first: Optional[int] = None
     for day in sorted(per_day):
         off = per_day[day].get((y, m))
         if off is None:
             continue
         iv = _psi(series.t_raw[i] + off, series.q[i])
         if any(_isect(iv, acc) is not None for acc in acceptable):
-            return day
-    return None
+            if collect_days is None:
+                return day
+            collect_days.append(day)
+            if first is None:
+                first = day
+    return first
 
 
 def _two_blend_repair(
@@ -2585,6 +3012,286 @@ def _two_blend_repair(
         stats=dict(sol.stats),
     )
     return repaired if repaired.cost < sol.cost else sol
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 (§9.4): hinted-boundary retry.
+# ---------------------------------------------------------------------------
+
+_DEMOTING_WHY = ("unexplained", "blend-unresolved", "no-single-S", "repair-merged")
+
+
+def _dev_month_set(sol: Solution) -> frozenset:
+    """Demoting-deviant (y, m) months of a solution (flutter is exempt)."""
+    return frozenset(
+        (y, m) for (y, m), why in sol.deviants if why in _DEMOTING_WHY
+    )
+
+
+def _reconstruct_package_inputs(series: Series, sol: Solution):
+    """Rebuild ``_package_solution`` inputs from a packaged ``Solution``
+    (§9.4 reconstruction spec): (code_at, dev_set, flutter_set, blends,
+    seed_zero).  A blend regime's begin MONTH is its blend constraint index;
+    that month keeps the OLD code in code_at and is recorded as a blend."""
+    n = len(series.months)
+    pos = {mi: i for i, mi in enumerate(series.months)}
+    regs = sorted(sol.regimes, key=lambda r: r.begin)
+    starts = []  # (begin_mi, begin_pos, code, blend_day, prev_code)
+    prev_code = None
+    for r in regs:
+        bmi = _mi(r.begin[0], r.begin[1])
+        starts.append((bmi, pos.get(bmi), r.code, r.blend_day, prev_code))
+        prev_code = r.code
+
+    code_at: List[Optional[str]] = [None] * n
+    for i in range(n):
+        mi = series.months[i]
+        active = None
+        for s in starts:
+            if s[0] <= mi:
+                active = s
+            else:
+                break
+        if active is None:
+            continue
+        bmi, bpos, code, bd, pc = active
+        if bd and mi == bmi and pc is not None:
+            code_at[i] = pc  # blend month keeps the old code
+        else:
+            code_at[i] = code
+
+    blends = []
+    for bmi, bpos, code, bd, pc in starts:
+        if bd and bpos is not None and pc is not None:
+            blends.append((bpos, pc, code))
+
+    dev_set = {
+        pos[_mi(y, m)]
+        for (y, m), why in sol.deviants
+        if why in ("unexplained", "blend-unresolved") and _mi(y, m) in pos
+    }
+    flutter_set = {
+        pos[_mi(y, m)]
+        for (y, m), why in sol.deviants
+        if why == "flutter" and _mi(y, m) in pos
+    }
+    seed_zero = bool(sol.stats.get("seeded", False))
+    return code_at, dev_set, flutter_set, blends, seed_zero
+
+
+def _repackage_incumbent(series, basis, sol, upfront, blend_fn, sid):
+    """Repackage the incumbent through ``_package_solution`` so candidate and
+    incumbent ranks are compared like-for-like (the incumbent's stored cost
+    may be a hand-adjusted two-blend-repair tuple).  Returns None on failure."""
+    try:
+        code_at, dev_set, flut, blends, seed_zero = _reconstruct_package_inputs(
+            series, sol
+        )
+        if any(c is None for c in code_at):
+            return None
+        return _package_solution(
+            series, basis, sol.coord_index, code_at, dev_set, blends,
+            seed_zero, upfront, blend_fn, sid, flutter_set=flut,
+        )
+    except Exception:
+        return None
+
+
+def _hinted_boundary_retry(
+    series: Series,
+    basis,
+    sol: Solution,
+    vintage_hints: List[Tuple[Tuple[int, int, int], str]],
+    blend_fn,
+    upfront,
+    sid: str,
+) -> Solution:
+    """Move a boundary onto a vintage hint's code when it STRICTLY reduces
+    deviants (§9.4).  For a hint (date, H) where the incumbent has a boundary
+    within +-2 months whose new-era code != H and >=1 demoting/flutter deviant
+    sits in the hinted regime's first 3 months, repackage the reading with H
+    over that regime's span and accept ONLY on strict ``_rank_key``
+    improvement over the REPACKAGED incumbent (never equal-rank)."""
+    if sol.coord_index is None or not sol.regimes:
+        return sol
+    tobos = _tobo_arrays(series, basis)
+    pos = {mi: i for i, mi in enumerate(series.months)}
+    repacked = _repackage_incumbent(series, basis, sol, upfront, blend_fn, sid)
+    if repacked is None or _dev_month_set(repacked) != _dev_month_set(sol):
+        return sol  # cannot trust a like-for-like comparison
+    inc_rank = _rank_key(repacked)
+
+    base_code_at, base_dev, base_flut, base_blends, seed_zero = (
+        _reconstruct_package_inputs(series, sol)
+    )
+    if any(c is None for c in base_code_at):
+        return sol
+    dev_flut_mis = {
+        _mi(y, m)
+        for (y, m), why in sol.deviants
+        if why in ("unexplained", "blend-unresolved", "flutter")
+    }
+    regs = sorted(sol.regimes, key=lambda r: r.begin)
+
+    for hd, H in vintage_hints:
+        if H not in tobos or tobos.get(H) is None:
+            continue
+        hmi = _mi(hd[0], hd[1])
+        for k, r in enumerate(regs):
+            bmi = _mi(r.begin[0], r.begin[1])
+            if abs(bmi - hmi) > 2 or r.code == H:
+                continue
+            span_lo = bmi
+            span_hi = (
+                _mi(regs[k + 1].begin[0], regs[k + 1].begin[1]) - 1
+                if k + 1 < len(regs)
+                else series.months[-1]
+            )
+            first3_hi = min(span_hi, span_lo + 2)
+            first3 = {mi for mi in dev_flut_mis if span_lo <= mi <= first3_hi}
+            if not first3:
+                continue
+            cand_code_at = list(base_code_at)
+            for i, mi in enumerate(series.months):
+                if span_lo <= mi <= span_hi:
+                    cand_code_at[i] = H
+            drop = {pos[mi] for mi in first3 if mi in pos}
+            cand = _package_solution(
+                series,
+                basis,
+                sol.coord_index,
+                cand_code_at,
+                base_dev - drop,
+                [b for b in base_blends if b[0] not in drop],
+                seed_zero,
+                upfront,
+                blend_fn,
+                sid,
+                flutter_set=base_flut - drop,
+            )
+            if cand is not None and _rank_key(cand) < inc_rank:
+                cand.audits.append(
+                    f"hinted-boundary-retry@{hd[0]:04d}-{hd[1]:02d}-{hd[2]:02d}"
+                )
+                return cand
+    return sol
+
+
+DEFLIP_MAX_SPAN = 3  # a "short flip" spans at most this many months
+# Dissolving a short edge flip may leave AT MOST this many genuinely
+# unexplained (non-edge) deviants; more means the flip encodes real structure
+# (the months fit the flip code), so it is kept.
+DEFLIP_MAX_UNEXEMPT = 1
+
+
+def _segment_iv_covering(sol: Solution, mi: int) -> Optional[Interval]:
+    for s in sol.segments:
+        if _mi(*s.begin) <= mi <= _mi(*s.end):
+            return Interval(s.s_lo, s.s_hi)
+    return None
+
+
+def _deflip_short_edge_regimes(
+    series: Series,
+    basis,
+    sol: Solution,
+    edge_mis: frozenset,
+    upfront,
+    blend_fn,
+    sid: str,
+) -> Solution:
+    """Prefer an edge deviant over a short obs-time flip at a record edge /
+    hiatus / QCF-constraint-gap restart.
+
+    A physical station does not switch obs time for 2-3 months right where the
+    constrained record restarts after a long gap; such a short flip is a
+    boundary artifact the search prefers only because a 0-deviant reading
+    outranks a fewer-regime reading that carries a deviant (and PHA's 18-month
+    minimum forbids absorbing the odd months as a short level).  This pass
+    dissolves such a flip into its neighbouring code, forcing the months that
+    then miss the neighbour's PHA level (by interval, not tolerance) to become
+    deviants -- a simpler, still verify-green reading (the deviants are
+    PHA-exempt via the solution's deviant set and TOB-reproduced).  Fires ONLY
+    when the flip BEGINS at an edge/hiatus month and the result is structurally
+    simpler with no new hard/soft-short segments."""
+    if sol.coord_index is None or len(sol.regimes) < 2 or not edge_mis:
+        return sol
+    tobos = _tobo_arrays(series, basis)
+    pos = {mi: i for i, mi in enumerate(series.months)}
+    cur = sol
+    for _ in range(len(sol.regimes)):  # bounded: at most one dissolve per pass
+        regs = sorted(cur.regimes, key=lambda r: r.begin)
+        if len(regs) < 2:
+            break
+        code_at, dev_set, flut, blends, seed_zero = _reconstruct_package_inputs(
+            series, cur
+        )
+        if any(c is None for c in code_at):
+            break
+        cur_dev = _dev_month_set(cur)
+        applied = False
+        for k, r in enumerate(regs):
+            bmi = _mi(r.begin[0], r.begin[1])
+            if bmi not in edge_mis:
+                continue  # flip must begin at an edge/hiatus/restart month
+            # Prefer extending the NEXT regime's code back (restart case);
+            # fall back to the previous regime at the record tail.
+            if k + 1 < len(regs):
+                nxt = regs[k + 1]
+                nbmi = _mi(nxt.begin[0], nxt.begin[1])
+                ncode = nxt.code
+                # absorb the next regime's blend month when it has one
+                span_hi_mi = nbmi if nxt.blend_day else nbmi - 1
+                probe_mi = nbmi + 1
+            elif k > 0:
+                prv = regs[k - 1]
+                ncode = prv.code
+                span_hi_mi = series.months[-1]
+                probe_mi = bmi - 1
+            else:
+                continue
+            if ncode == r.code:
+                continue
+            if span_hi_mi - bmi > DEFLIP_MAX_SPAN:
+                continue
+            nseg = _segment_iv_covering(cur, probe_mi)
+            span_pos = [i for i, mi in enumerate(series.months) if bmi <= mi <= span_hi_mi]
+            if not span_pos:
+                continue
+            alt = list(code_at)
+            force = set()
+            arr = tobos.get(ncode)
+            for i in span_pos:
+                alt[i] = ncode
+                off = arr[i] if arr is not None else None
+                iv = _psi(series.t_raw[i] + off, series.q[i]) if off is not None else None
+                if nseg is None or iv is None or _isect(iv, nseg) is None:
+                    force.add(i)
+            alt_blends = [b for b in blends if not (bmi <= series.months[b[0]] <= span_hi_mi)]
+            cand = _package_solution(
+                series, basis, sol.coord_index, alt, dev_set | force, alt_blends,
+                seed_zero, upfront, blend_fn, sid, flutter_set=flut,
+            )
+            if cand is None:
+                continue
+            new_dev = _dev_month_set(cand) - cur_dev
+            n_unexempt = sum(1 for (y, m) in new_dev if _mi(y, m) not in edge_mis)
+            if (
+                len(cand.regimes) < len(regs)
+                and cand.cost[0] <= cur.cost[0]
+                and cand.cost[5] <= cur.cost[5]
+                and all(bmi <= _mi(y, m) <= span_hi_mi for (y, m) in new_dev)
+                and n_unexempt <= DEFLIP_MAX_UNEXEMPT
+            ):
+                cand.audits.append(
+                    f"deflip-edge@{r.begin[0]:04d}-{r.begin[1]:02d}:{r.code}->{ncode}"
+                )
+                cur = cand
+                applied = True
+                break
+        if not applied:
+            break
+    return cur
 
 
 def _knife_edge_retry(

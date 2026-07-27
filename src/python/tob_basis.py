@@ -451,6 +451,25 @@ class BasisRunner:
             # on failure: keep workspace for debugging
 
     # -- public API ---------------------------------------------------------
+    def get_bases_cached(
+        self,
+        station_id: str,
+        raw_path: Path,
+        coords: List[Tuple[float, float]],
+        transform: Optional[dict] = None,
+    ) -> Optional[List[Basis]]:
+        """Return cached bases only; None on a cache miss (never runs TOBMain).
+
+        Used by consolidate-only tooling that must not solve."""
+        raw_path = Path(raw_path)
+        key = self._cache_key(raw_path, coords, transform)
+        cache_file = self.cache_root / station_id / f"{key}.json"
+        if not cache_file.exists():
+            return None
+        with open(cache_file) as fh:
+            payload = json.load(fh)
+        return [Basis.from_json(o) for o in payload["bases"]]
+
     def get_bases(
         self,
         station_id: str,

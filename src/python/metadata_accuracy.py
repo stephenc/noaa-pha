@@ -13,7 +13,7 @@ decision (see report header).
 
 Usage:
   uv run python src/python/metadata_accuracy.py \
-      --solutions work/solutions --phr-zip data/phr.txt.zip \
+      --solutions data/intermediate/solutions --phr-zip data/phr.txt.zip \
       --raw-dir data/input/raw/tavg --report work/metadata_accuracy.tsv
 """
 
