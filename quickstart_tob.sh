@@ -7,12 +7,17 @@ Usage: ./quickstart_tob.sh [--data-dir DIR] [--skip-make] [--no-viewer]
                           [--viewer-host HOST] [--viewer-port PORT]
 
 Runs the TOB + PHA quickstart flow:
-  1) build binaries (unless --skip-make)
+  1) build binaries (unless --skip-make); TOB bit-exactness needs
+     TRIG_BACKEND=llvm-exact (set when invoking make, or rebuild later)
   2) conditionally download input archives (only if remote file is newer)
   3) reconstruct input/output layout
-  4) reconstruct history files from QCU/QCF deltas
+  4) reconstruct history + provision intermediate/ when history is empty
+     or intermediate/ is not ready (requires uv)
   5) run TOBMain and PHAMain
   6) launch PHAview (unless --no-viewer)
+
+Optional after a successful TOBMain run (not part of this script):
+  uv run python src/python/verify_his.py --jobs 8
 USAGE
 }
 
@@ -142,13 +147,39 @@ python3 src/python/qcf_to_outputs.py \
   --qcf-tar "${DATA_DIR}/ghcnm.tavg.latest.qcf.tar.gz" \
   --base "${DATA_DIR}"
 
-python3 src/python/qcufdelta_to_his.py \
-  --inv "${DATA_DIR}/input/station.inv" \
-  --qcu-dir "${DATA_DIR}/input/raw/tavg" \
-  --qcf-dir "${DATA_DIR}/output/qcf/tavg" \
-  --out-history-dir "${DATA_DIR}/input/history" \
-  --mshr-zip "${DATA_DIR}/mshr_enhanced.txt.zip" \
-  --tob-bin "bin/TOBMain"
+# Station history (.his) files are not published by NOAA. Reconstruction
+# writes them under intermediate/history and also provisions
+# intermediate/station.inv + intermediate/tob/tavg required by tob.properties.
+# Re-run when history is empty OR intermediate is not ready (CONUS:
+# solver-derived from QCU/QCF residuals; non-CONUS: metadata-derived from
+# MSHR/PHR).
+history_empty=0
+if [[ -z "$(ls -A "${DATA_DIR}/intermediate/history" 2>/dev/null)" ]]; then
+  history_empty=1
+fi
+intermediate_ready=1
+if [[ ! -s "${DATA_DIR}/intermediate/station.inv" ]] || \
+   [[ ! -d "${DATA_DIR}/intermediate/tob/tavg" ]]; then
+  intermediate_ready=0
+fi
+if [[ "${history_empty}" -eq 1 || "${intermediate_ready}" -eq 0 ]]; then
+  if command -v uv >/dev/null 2>&1; then
+    reconstruct_args=(--base "${DATA_DIR}")
+    # History already present: skip stations with cached solutions so we only
+    # re-provision intermediate/ (and fill any missing solutions) rather than
+    # re-solving the full inventory.
+    if [[ "${history_empty}" -eq 0 ]]; then
+      reconstruct_args+=(--skip-existing)
+    fi
+    echo "Reconstructing station histories / intermediate into ${DATA_DIR} (may take 15-20 min)..."
+    uv run python src/python/reconstruct_his.py "${reconstruct_args[@]}"
+  else
+    echo "ERROR: history/intermediate not ready under ${DATA_DIR} and 'uv' is not installed." >&2
+    echo "Install uv (https://docs.astral.sh/uv/) and run:" >&2
+    echo "  uv run python src/python/reconstruct_his.py --base ${DATA_DIR}" >&2
+    exit 1
+  fi
+fi
 
 bin/TOBMain -p "${DATA_DIR}/tob.properties"
 bin/PHAMain -p "${DATA_DIR}/tob.properties"
@@ -163,9 +194,9 @@ fi
 
 VIEWER_DIR="${DATA_DIR}/output/adj/tavg"
 VIEWER_REF="${DATA_DIR}/output/qcf/tavg"
-VIEWER_REF2="${DATA_DIR}/input/tob/tavg"
-VIEWER_HIS="${DATA_DIR}/input/history"
-VIEWER_INV="${DATA_DIR}/input/station.inv"
+VIEWER_REF2="${DATA_DIR}/intermediate/tob/tavg"
+VIEWER_HIS="${DATA_DIR}/intermediate/history"
+VIEWER_INV="${DATA_DIR}/intermediate/station.inv"
 
 echo "Launching viewer at http://${VIEWER_HOST}:${VIEWER_PORT}/"
 exec bin/PHAview \

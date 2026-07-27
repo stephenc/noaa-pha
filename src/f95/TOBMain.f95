@@ -712,14 +712,23 @@ contains
   !! bmoh, bdayh, tobtmp, a_table.
   subroutine apply_adjustments()
     integer :: y, m
-    real    :: adj
+    real    :: adj, rval
 
+    ! Genuine v3 (ushcn_tobs.v4a.f) arithmetic: values are converted to
+    ! real degrees on read (ix = float(idata)/scale, line 1856), the
+    ! adjustment is subtracted in real arithmetic (IX = IX - ADJ, lines
+    ! 1076/1201/1356), and rounding to integer hundredths happens only on
+    ! write (nint(IX*scale), line 1415).  The rounding is therefore
+    ! value-dependent; subtracting nint(adj*scale) from the integer value
+    ! is NOT equivalent at half-cent knife edges.
     do y = first_year, last_year
       do m = 1, 12
         if (values(y, m) == MISSING_INT) cycle
         if (y < tob_apply_year) cycle
-        adj = get_monthly_adj(y, m)
-        values(y, m) = values(y, m) - nint(adj * VALUE_SCALE)
+        adj  = get_monthly_adj(y, m)
+        rval = real(values(y, m)) / VALUE_SCALE
+        rval = rval - adj
+        values(y, m) = nint(rval * VALUE_SCALE)
       end do
     end do
   end subroutine apply_adjustments
@@ -783,7 +792,11 @@ contains
         tob = tobtmp(active_idx)
         if (tob >= 26 .and. tob <= 28) call tobchg(m, tob)
         if (tob >= 1 .and. tob <= 24) then
-          weighted_sum = weighted_sum + real(seg_end - seg_start + 1) * a_table(m, tob)
+          ! Genuine v3 accumulates with per-term division
+          ! (ADJAV = ADJAV + FLOAT(NA(P))*AAV(P)/SUMNA, line ~1174), which
+          ! rounds differently in float32 than sum-then-divide.
+          weighted_sum = weighted_sum + &
+              real(seg_end - seg_start + 1) * a_table(m, tob) / real(days_tot)
         end if
       end if
       seg_start  = bdayh(n)
@@ -796,11 +809,12 @@ contains
       tob = tobtmp(active_idx)
       if (tob >= 26 .and. tob <= 28) call tobchg(m, tob)
       if (tob >= 1 .and. tob <= 24) then
-        weighted_sum = weighted_sum + real(seg_end - seg_start + 1) * a_table(m, tob)
+        weighted_sum = weighted_sum + &
+            real(seg_end - seg_start + 1) * a_table(m, tob) / real(days_tot)
       end if
     end if
 
-    adj = weighted_sum / real(days_tot)
+    adj = weighted_sum
   end function get_monthly_adj
 
   !> Find the index of the latest history change whose begin-date is

@@ -1,0 +1,20 @@
+[project]
+name = "ghcnm-pha-tools"
+version = "0.1.0"
+description = "Python helper tooling for the reconstructed GHCNM v4 PHA pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+]
+
+[dependency-groups]
+dev = [
+    # Type checking: install the Basilisk language server separately
+    # (not on PyPI — `brew install Nimblesite/tap/basilisk`; see
+    # https://www.basilisk-python.dev/). The PyPI package named
+    # "basilisk" is an unrelated 2015 NoSQL mapper; do not add it here.
+    "black>=24.0",
+]
+
+[tool.black]
+line-length = 88

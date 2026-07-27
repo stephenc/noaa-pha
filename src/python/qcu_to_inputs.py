@@ -37,10 +37,10 @@ def clamp_version(version: str) -> str:
 
 
 def ensure_dirs(base: Path, dry_run: bool) -> Dict[str, Path]:
+    # Station history (.his) and the TOB stage live under intermediate/,
+    # owned by reconstruct_his.py + TOBMain (not created here).
     paths = {
         "input_raw_tavg": base / "input" / "raw" / "tavg",
-        "input_tob_tavg": base / "input" / "tob" / "tavg",
-        "input_history": base / "input" / "history",
         "output_adj": base / "output" / "adj" / "tavg",
     }
     if not dry_run:
@@ -188,10 +188,7 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
         "pha.element = tavg",
         f"pha.version = {version}",
         "",
-        "pha.path.station-metadata = " + str(base / "input" / "station.inv"),
-        "pha.path.station-history = " + str(base / "input" / "history") + "/",
-        "pha.path.station-element-data-in = " + str(base / "input" / "{pha.input-data-type}" / "tavg") + "/",
-        "pha.path.neighbors.station-element-data-in = " + str(base / "input" / "{pha.neighbors.input-data-type}" / "tavg") + "/",
+        "pha.path.station-history = " + str(base / "intermediate" / "history") + "/",
         "pha.path.station-element-data-out = " + str(base / "output" / "adj" / "tavg") + "/",
         "",
         "pha.path.neighbors.distance = " + str(base / "output" / "neighbor-distance.txt"),
@@ -220,8 +217,23 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
     ]
 
     def write_prop(path: Path, input_type: str, neighbors_type: str, include_tob: bool) -> None:
+        # The TOB stage is an intermediate between input/ and output/: its
+        # per-station data and its station list live under intermediate/.
+        # The intermediate station.inv (written by qcf_to_outputs.py) is
+        # filtered to stations with a QCF output file, so neither TOBMain
+        # nor PHAMain processes stations absent from the published output
+        # set.  Raw (no-TOB) runs operate on the unfiltered input universe.
+        if input_type == "tob":
+            metadata = base / "intermediate" / "station.inv"
+            data_in = base / "intermediate" / "tob" / "tavg"
+        else:
+            metadata = base / "input" / "station.inv"
+            data_in = base / "input" / input_type / "tavg"
         lines = common + [
             "",
+            "pha.path.station-metadata = " + str(metadata),
+            "pha.path.station-element-data-in = " + str(data_in) + "/",
+            "pha.path.neighbors.station-element-data-in = " + str(data_in) + "/",
             f"pha.input-data-type = {input_type}",
             f"pha.neighbors.input-data-type = {neighbors_type}",
         ]
@@ -233,7 +245,7 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
                 "tob.backfill-if-first-nonblank = false",
                 "tob.pause-on-blank-after-nonblank = false",
                 "tob.path.station-element-data-in = " + str(base / "input" / "raw" / "tavg") + "/",
-                "tob.path.station-element-data-out = " + str(base / "input" / "tob" / "tavg") + "/",
+                "tob.path.station-element-data-out = " + str(base / "intermediate" / "tob" / "tavg") + "/",
                 "tob.logger.filename = " + str(base / "output" / "tob.log"),
                 "tob.logger.level = INFO",
                 "tob.logger.print-to-stdout = false",

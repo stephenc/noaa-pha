@@ -42,6 +42,7 @@ type StationInfo struct {
 	Name        string `json:"name"`
 	HasRef      bool   `json:"has_ref"`
 	Breakpoints *int   `json:"breakpoints"`
+	TobChanges  *int   `json:"tob_changes"`
 }
 
 type StationRow struct {
@@ -292,7 +293,10 @@ func parseHisFile(path string) []HisEntry {
 	scanner := bufio.NewScanner(fh)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if len(line) == 0 || line[0] != '2' {
+		// Source codes 0 (USHCN SHF), 2 (MSHR) and 3 (CDMP) all carry
+		// obs-time history; only source 1 (daily TOB) is skipped, matching
+		// TOBMain's reader.
+		if len(line) == 0 || (line[0] != '0' && line[0] != '2' && line[0] != '3') {
 			continue
 		}
 		fields := strings.Fields(line)
@@ -317,7 +321,16 @@ func parseHisFile(path string) []HisEntry {
 		if err1 != nil || err2 != nil || err3 != nil {
 			continue
 		}
-		tobCode := fields[len(fields)-1]
+		// Obs-time code lives at fixed columns 78-81 (1-based) per the
+		// FORMAT 90 layout; fall back to the last whitespace field for
+		// legacy short-format files.
+		tobCode := ""
+		if len(line) >= 81 {
+			tobCode = strings.TrimSpace(line[77:81])
+		}
+		if tobCode == "" {
+			tobCode = fields[len(fields)-1]
+		}
 		rows = append(rows, rawRow{year, month, day, tobCode})
 	}
 	if scanner.Err() != nil || len(rows) < 2 {
@@ -1401,7 +1414,19 @@ func (app *ViewerApp) getStationList(includeQC bool) []StationInfo {
 		if entry, ok := app.inv[stationID]; ok {
 			name = entry.Name
 		}
-		stations = append(stations, StationInfo{ID: stationID, Name: name, HasRef: hasRef, Breakpoints: bps})
+		var tob *int
+		if app.historyDir != "" {
+			// Count actual code changes (entries[0] is the initial code
+			// label, not a change).
+			n := 0
+			for i, e := range app.getHisData(stationID) {
+				if i > 0 && e.TobChange {
+					n++
+				}
+			}
+			tob = &n
+		}
+		stations = append(stations, StationInfo{ID: stationID, Name: name, HasRef: hasRef, Breakpoints: bps, TobChanges: tob})
 	}
 
 	app.cacheMu.Lock()
