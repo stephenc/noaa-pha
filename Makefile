@@ -42,7 +42,7 @@ endif
 #   standard    (default) gfortran intrinsics -> platform libm. Portable, but
 #               diverges from NOAA on 4 US stations / 136 months (<=0.01 C).
 #   llvm-exact LLVM-libc's correctly-rounded algorithm (Apache-2.0 public
-#               constants) + a 4-row cosf gate derived from NOAA public data,
+#               constants) + a 5-row cosf gate derived from NOAA public data,
 #               compiled as a deterministic C object (src/f95/libm_llvm_trig.c)
 #               and linked in. PORTABLE and bit-identical to NOAA across all
 #               12,781 US stations, on x86_64 and AArch64 alike. Redistributable.

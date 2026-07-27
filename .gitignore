@@ -4,4 +4,6 @@
 /deps.mk
 /fort.7
 /fort.8
-/data/
+/data*/
+# Local go build output (real product is bin/PHAview via `make phaview`)
+/src/go/viewer

@@ -125,6 +125,8 @@
       <button class="btn active" id="sortId" data-sort="id">ID</button>
       <button class="btn" id="sortBpAsc" data-sort="bp_asc">BP ↑</button>
       <button class="btn" id="sortBpDesc" data-sort="bp_desc">BP ↓</button>
+      <button class="btn" id="sortTobAsc" data-sort="tob_asc">TOB ↑</button>
+      <button class="btn" id="sortTobDesc" data-sort="tob_desc">TOB ↓</button>
     </div>
     <select id="stationSelect" size="6" multiple></select>
     <button id="selectAllBtn" onclick="selectAllStations()" disabled>Select all</button>
@@ -959,7 +961,11 @@
       setActiveInGroup(['qcIgnore', 'qcInclude'], includeQC ? 'qcInclude' : 'qcIgnore');
       setActiveInGroup(['granMonthly', 'granYearly', 'granCount'],
         gran === 'monthly' ? 'granMonthly' : (gran === 'count' ? 'granCount' : 'granYearly'));
-      setActiveInGroup(['sortId', 'sortBpAsc', 'sortBpDesc'], storedSort === 'bp_asc' ? 'sortBpAsc' : (storedSort === 'bp_desc' ? 'sortBpDesc' : 'sortId'));
+      setActiveInGroup(['sortId', 'sortBpAsc', 'sortBpDesc', 'sortTobAsc', 'sortTobDesc'],
+        storedSort === 'bp_asc' ? 'sortBpAsc'
+        : (storedSort === 'bp_desc' ? 'sortBpDesc'
+        : (storedSort === 'tob_asc' ? 'sortTobAsc'
+        : (storedSort === 'tob_desc' ? 'sortTobDesc' : 'sortId'))));
       if (stationParam) {
         pendingStationIds = stationParam.split(',').filter(Boolean);
         lastStationIds = pendingStationIds.slice();
@@ -1580,6 +1586,8 @@
       let sortMode = 'id';
       if (document.getElementById('sortBpAsc').classList.contains('active')) sortMode = 'bp_asc';
       if (document.getElementById('sortBpDesc').classList.contains('active')) sortMode = 'bp_desc';
+      if (document.getElementById('sortTobAsc').classList.contains('active')) sortMode = 'tob_asc';
+      if (document.getElementById('sortTobDesc').classList.contains('active')) sortMode = 'tob_desc';
       let rows = data.filter(s => {
         if (filterTokens.length === 0) return true;
         const idLower = (s.id || '').toLowerCase();
@@ -1590,6 +1598,10 @@
         rows.sort((a, b) => (a.breakpoints ?? 1e9) - (b.breakpoints ?? 1e9));
       } else if (sortMode === 'bp_desc') {
         rows.sort((a, b) => (b.breakpoints ?? -1) - (a.breakpoints ?? -1));
+      } else if (sortMode === 'tob_asc') {
+        rows.sort((a, b) => (a.tob_changes ?? 1e9) - (b.tob_changes ?? 1e9));
+      } else if (sortMode === 'tob_desc') {
+        rows.sort((a, b) => (b.tob_changes ?? -1) - (a.tob_changes ?? -1));
       } else {
         rows.sort((a, b) => a.id.localeCompare(b.id));
       }
@@ -1599,7 +1611,7 @@
         const opt = document.createElement('option');
         opt.value = s.id;
         const name = s.name ? ` - ${s.name}` : '';
-        opt.textContent = `${s.id}${name} (bp=${s.breakpoints ?? 'n/a'})`;
+        opt.textContent = `${s.id}${name} (bp=${s.breakpoints ?? 'n/a'}, tob=${s.tob_changes ?? 'n/a'})`;
         sel.appendChild(opt);
       });
       if (pendingStationIds && pendingStationIds.length > 0) {
@@ -1726,12 +1738,13 @@
       if (stationCache) applyStations(stationCache);
       else loadStations();
     });
-    const sortButtons = ['sortId', 'sortBpAsc', 'sortBpDesc'];
+    const sortButtons = ['sortId', 'sortBpAsc', 'sortBpDesc', 'sortTobAsc', 'sortTobDesc'];
+    const sortModes = { sortBpAsc: 'bp_asc', sortBpDesc: 'bp_desc', sortTobAsc: 'tob_asc', sortTobDesc: 'tob_desc', sortId: 'id' };
     sortButtons.forEach(id => {
       document.getElementById(id).addEventListener('click', () => {
         sortButtons.forEach(other => document.getElementById(other).classList.remove('active'));
         document.getElementById(id).classList.add('active');
-        const sortMode = id === 'sortBpAsc' ? 'bp_asc' : (id === 'sortBpDesc' ? 'bp_desc' : 'id');
+        const sortMode = sortModes[id] || 'id';
         sessionStorage.setItem(STORAGE_SORT, sortMode);
         if (stationCache) applyStations(stationCache);
         else loadStations();

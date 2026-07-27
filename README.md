@@ -87,16 +87,16 @@ python3 src/python/qcu_to_inputs.py --qcu-tar data/ghcnm.tavg.latest.qcu.tar.gz 
 python3 src/python/qcf_to_outputs.py --qcf-tar data/ghcnm.tavg.latest.qcf.tar.gz --base data
 ```
 
-4. Reconstruct TOB history files (`data/input/history/*.his`) from QCU/QCF residuals:
+4. Reconstruct the TOB history files (`data/intermediate/history/*.his`).
+
+NOAA does not publish these.  The reconstructor derives bit-exact CONUS
+histories from the QCU/QCF residuals (requires `bin/TOBMain` built with
+`TRIG_BACKEND=llvm-exact`, steps 1-3 done) and metadata-derived histories
+for non-CONUS stations from MSHR/PHR; it takes roughly 15-20 minutes at the
+default parallelism:
 
 ```bash
-python3 src/python/qcuf_pattern_to_his.py \
-  --inv data/input/station.inv \
-  --qcu-dir data/input/raw/tavg \
-  --qcf-dir data/output/qcf/tavg \
-  --out-history-dir data/input/history \
-  --mshr-zip data/mshr_enhanced.txt.zip \
-  --tob-bin bin/TOBMain
+uv run python src/python/reconstruct_his.py
 ```
 
 5. Generate TOB-adjusted monthly data, then run PHA:
@@ -106,19 +106,26 @@ bin/TOBMain -p data/tob.properties
 bin/PHAMain -p data/tob.properties
 ```
 
-6. Optional: launch the viewer:
+6. Optional: verify that TOBMain output matches the reconstruction solutions
+   bit-exactly (not required for normal use; useful as an end-to-end gate):
+
+```bash
+uv run python src/python/verify_his.py --jobs 8
+```
+
+7. Optional: launch the viewer:
 
 ```bash
 bin/PHAview \
   --dir data/output/adj/tavg \
   --ref data/output/qcf/tavg \
-  --ref2 data/input/tob/tavg \
-  --inventory data/input/station.inv
+  --ref2 data/intermediate/tob/tavg \
+  --history data/intermediate/history \
+  --inventory data/intermediate/station.inv
 ```
 
 Then open: `http://localhost:8080/`
 
-For alternative history reconstruction from PHR/MSHR, see `docs/WORKFLOWS.md`.
 For viewer usage details, see `src/go/README.md`.
 
 ## Documentation

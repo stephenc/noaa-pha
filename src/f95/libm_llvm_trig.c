@@ -16,11 +16,15 @@
  * Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  *
- * The 4-row cosf GATE (see llvm_cosf) is NOT from LLVM: it is derived from
+ * The 5-row cosf GATE (see llvm_cosf) is NOT from LLVM: it is derived from
  * NOAA's public TOB reference by end-to-end integer matching; each correction's
  * value is the faithful-not-nearest float32 bracket (nextafter of the
  * correctly-rounded value toward the true cosine) -- a public-math fact.
- * Validated: bit-identical to LLVM-libc except the 4 gated cosf inputs, and the
+ * Rows 1-4 were derived on the x86/glibc reference platform; row 5 from the
+ * 2026-07-23 genuine-ifort verification (oneAPI 2023.2.1 container, Intel
+ * SVML __svml_cosf value confirmed by direct probe), which resolves the
+ * USC00222099 April a_table cell that NOAA's published QCF certifies.
+ * Validated: bit-identical to LLVM-libc except the 5 gated cosf inputs, and the
  * real gfortran-built TOBMain reproduces the NOAA TOB reference bit-for-bit
  * across all 12,781 US stations on the x86/glibc reference platform.
  *
@@ -137,7 +141,7 @@ float llvm_cosf(float x) {
     }
   }
 
-  /* 4-row cosf GATE, derived from the NOAA public target. Keyed on |x|: cos is
+  /* 5-row cosf GATE, derived from the NOAA public target. Keyed on |x|: cos is
    * even, so the same correction applies to +/-x -- the Fortran TOB code may
    * present either sign of the same argument depending on platform rounding of
    * a near-zero intermediate. Output is the faithful-not-nearest float32
@@ -147,6 +151,13 @@ float llvm_cosf(float x) {
     case 0x3b1f2ec9U: return b2f(0x3f7fffceU);   /* cos(0x1.3e5d92p-9) */
     case 0x3b49c071U: return b2f(0x3f7fffb0U);   /* cos(0x1.9380e2p-9) */
     case 0x3b950397U: return b2f(0x3f7fff52U);   /* cos(0x1.2a072ep-8) */
+    /* Row 5 (2026-07-23): cos(0x1.05944p-10). Resolves USC00222099's April
+     * a_table knife edge -- NOAA's published QCF certifies the ifort-built
+     * value (8/8 April months exact). Output verified as the genuine Intel
+     * SVML __svml_cosf result (oneAPI 2023.2.1, icc -O2 vectorized loop,
+     * direct probe 2026-07-23); it is the faithful bracket of the true
+     * cosine, 1 ulp below the correctly-rounded 0x3f7ffff8. */
+    case 0x3a82ca22U: return b2f(0x3f7ffff7U);
     default: return result;
   }
 }

@@ -21,9 +21,11 @@ curl -o ./data/phr.txt.zip https://www.ncei.noaa.gov/access/homr/file/phr.txt.zi
 curl -o ./data/mshr_enhanced.txt.zip https://www.ncei.noaa.gov/access/homr/file/mshr_enhanced.txt.zip
 ```
 
-**Note:** The `latest` QCU/QCF files are rolling and can change daily. NOAA does
-not publish an official archive of daily snapshots, so reproducibility requires
-you to keep your own copies.
+**Note:** The `latest` QCU/QCF files are rolling and can change daily. NOAA
+publishes an official archive of dated snapshots (since 2026-04-29) at
+<https://www.ncei.noaa.gov/data/global-historical-climatology-network-monthly/v4/temperature/archive/>,
+so a specific vintage can be fetched from there; keeping local copies of the
+exact files you processed is still good practice.
 
 ### 2) Populate `./data` workspace
 
@@ -39,25 +41,23 @@ python3 src/python/qcf_to_outputs.py \
   --base data
 ```
 
-There are two strategies for recovering the history files.
+The station history files (`data/intermediate/history/*.his`) are not published
+by NOAA.  Reconstruct them with `uv run python src/python/reconstruct_his.py`
+(after the input/output layout is built and `bin/TOBMain` is compiled with
+`TRIG_BACKEND=llvm-exact`): CONUS histories are solver-derived bit-exact
+from the QCU/QCF residuals where the solver reports `exact=True`; non-CONUS
+histories are metadata-derived from the MSHR/PHR records. The same command
+provisions `data/intermediate/` (`history/`, filtered `station.inv`, and
+`tob/tavg` out-dir) required by `tob.properties`.
 
-1. Reverse-engineer from the QCF-QCU delta (*recommended*)
-    ```bash 
-    python3 src/python/qcufdelta_to_his.py \
-      --inv data/input/station.inv \
-      --qcu-dir data/input/raw/tavg \
-      --qcf-dir data/output/qcf/tavg \
-      --mshr-zip mshr_enhanced.txt.zip \
-      --out-history-dir data/input/history
-   ```
-2. Construct from the PHR records
-    ```bash
-    python3 src/python/phr_to_his.py \
-      --inventory data/input/station.inv \
-      --phr-zip phr.txt.zip \
-      --mshr-zip mshr_enhanced.txt.zip \
-      --out-dir data/input/history    
-    ```
+Optional after a TOBMain run: verify that TOB output matches the stored
+solutions bit-exactly (not required for normal use):
+
+```bash
+uv run python src/python/verify_his.py --jobs 8
+```
+
+See `src/python/README.md` for the full reconstruction CLI surface.
 
 ### 3) Run the pipeline
 
@@ -97,10 +97,11 @@ Visualise changes
 
 ```bash
 bin/PHAview \
-  --inventory data/input/station.inv \
+  --inventory data/intermediate/station.inv \
+  --history data/intermediate/history \
   --dir data/output/adj/tavg \
-  --ref data/input/raw/tavg \
-  --ref2 data/output/qcf/tavg 
+  --ref data/output/qcf/tavg \
+  --ref2 data/intermediate/tob/tavg
 ```
 
 ## Running Tests
@@ -172,7 +173,12 @@ For usage details, see `src/go/README.md`.
 
 ## Python Helpers (Added)
 
-Python helper scripts have been added under `src/python` for data conversion and comparison workflows (for example, QCU/QCF transformations and directory comparisons).
+Python helper scripts have been added under `src/python` for:
 
-These helper scripts were not present in NOAA's original `ghcnm.src.v4.03172025.tar` tarball; they were added as part of this reconstructed repository.
+- QCU/QCF workspace preparation (`qcu_to_inputs.py`, `qcf_to_outputs.py`)
+- Bit-exact station-history reconstruction (`reconstruct_his.py` and supporting modules)
+- Optional post-TOBMain verification (`verify_his.py`)
+- Directory comparison (`compare_dirs.py`)
+
+These helper scripts were not present in NOAA's original `ghcnm.src.v4.03172025.tar` tarball; they were added as part of this reconstructed repository. Details: `src/python/README.md`.
 

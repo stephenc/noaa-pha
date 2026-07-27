@@ -1,6 +1,6 @@
 module libm_llvm_compat
   ! Portable, BIT-EXACT float32 trig for the NOAA TOB pipeline, built from
-  ! LLVM-libc's public, correctly-rounded algorithm + a 4-row cosf correction
+  ! LLVM-libc's public, correctly-rounded algorithm + a 5-row cosf correction
   ! gate derived from NOAA's public TOB reference (see src/f95/libm_llvm_trig.c
   ! for the implementation and full provenance).  It uses only Apache-2.0-licensed
   ! LLVM-libc constants and a public-data-derived gate, so it is fully
