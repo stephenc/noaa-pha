@@ -463,7 +463,14 @@ def build_his_row(
     )
     instr_f = "".join(f"{i:<5s} " for i in instruments)
     row += f"{instr_f:<66s}"  # cols 87-152
-    assert len(row) == HIS_ROW_WIDTH, len(row)
+    # Load-bearing: TOBMain reads .his by fixed FORMAT-90 columns, so a wrong
+    # width silently misaligns every field.  Raise (not assert -- must survive
+    # `python -O`) if an over-long field pushed the row off 152 columns.
+    if len(row) != HIS_ROW_WIDTH:
+        raise ValueError(
+            f"FORMAT-90 row width {len(row)} != {HIS_ROW_WIDTH}; a field "
+            f"overflowed its column (row={row!r})"
+        )
     return row
 
 

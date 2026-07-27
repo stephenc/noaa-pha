@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import multiprocessing as mp
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -362,8 +363,15 @@ def solve_station(
                     kind = "tob"  # LOCAL: gates emission + summary below
                     d["audits"].append("hint-promoted-pha-only")
 
-    with open(SOLUTIONS_DIR / f"{sid}.json", "w") as fh:
+    # Atomic write: --skip-existing resumes on existence alone, so a run
+    # killed mid-write must never leave a truncated {sid}.json that resume
+    # then treats as done.  Write to a sibling temp and rename (rename is
+    # atomic within a directory).
+    final = SOLUTIONS_DIR / f"{sid}.json"
+    tmp = SOLUTIONS_DIR / f"{sid}.json.tmp"
+    with open(tmp, "w") as fh:
         json.dump(d, fh, indent=1)
+    os.replace(tmp, final)
 
     # Pure-PHA CONUS stations get NO .his file: TOBMain copies the input
     # verbatim when no history exists (numerically identical, byte-safe),
@@ -484,8 +492,6 @@ def _worker(job) -> Tuple[str, str]:
 
 
 def main() -> None:
-    import os
-
     ap = argparse.ArgumentParser(description=__doc__)
     sel = ap.add_mutually_exclusive_group()
     sel.add_argument("--stations", help="comma-separated station ids")
@@ -695,8 +701,11 @@ def main() -> None:
     print(f"# {n_exact}/{len(lines)} exact", flush=True)
     if args.summary_file:
         Path(args.summary_file).parent.mkdir(parents=True, exist_ok=True)
+        # Sort by station id (each line starts with the sid): imap_unordered
+        # yields in completion order, so an unsorted summary of a bit-exact
+        # pipeline would differ byte-for-byte between runs.
         with open(args.summary_file, "w") as fh:
-            fh.write("\n".join(lines) + "\n")
+            fh.write("\n".join(sorted(lines)) + "\n")
 
 
 if __name__ == "__main__":

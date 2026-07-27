@@ -236,6 +236,29 @@ class TestEmit(unittest.TestCase):
             self.assertEqual(lines[0], expected)
 
 
+class TestNintRounding(unittest.TestCase):
+    """Elevation feet must use Fortran NINT (round half AWAY from zero), not
+    Python's banker's rounding, or a station on an exact half-foot emits a
+    different .his row than genuine v3."""
+
+    def test_half_rounds_away_from_zero(self):
+        self.assertEqual(his_emit._nint(0.5), 1)
+        self.assertEqual(his_emit._nint(1.5), 2)  # round() gives 2 here too
+        self.assertEqual(his_emit._nint(2.5), 3)  # round() gives 2 (banker's)
+        self.assertEqual(his_emit._nint(-2.5), -3)  # round() gives -2
+        self.assertEqual(his_emit._nint(-0.5), -1)
+
+    def test_non_ties_match_ordinary_rounding(self):
+        self.assertEqual(his_emit._nint(2.4), 2)
+        self.assertEqual(his_emit._nint(2.6), 3)
+        self.assertEqual(his_emit._nint(-2.4), -2)
+        self.assertEqual(his_emit._nint(-2.6), -3)
+
+    def test_diverges_from_python_round_at_tie(self):
+        # Guard the exact case that motivated the fix.
+        self.assertNotEqual(his_emit._nint(2.5), round(2.5))
+
+
 class TestMetadataHis(unittest.TestCase):
     """Metadata-derived histories for stations outside the TOB gate."""
 

@@ -203,6 +203,44 @@ class TestVerify(unittest.TestCase):
         self.assertEqual(res.n_mismatch, 1)
         self.assertTrue(any(s.startswith("tob@1985-03") for s in res.samples))
 
+    def test_tob_station_without_provider_raises(self):
+        # A TOB station verified with no basis provider used to report a
+        # vacuous exact_tob=True (every month "no-basis"); it must now fail.
+        with tempfile.TemporaryDirectory() as td:
+            ws = _Workspace(Path(td))
+            with self.assertRaises(ValueError):
+                verify_his.verify_station(
+                    SID,
+                    ws.tob_dir,
+                    ws.qcu_dir,
+                    ws.qcf_dir,
+                    ws.solutions,
+                    ws.inv,
+                    None,
+                )
+
+    def test_missing_basis_code_is_not_a_pass(self):
+        # A provider that lacks a code the solution uses leaves those months
+        # UNVERIFIED -- that is a gate failure, not a silent exact_tob=True.
+        with tempfile.TemporaryDirectory() as td:
+            ws = _Workspace(Path(td))
+
+            def empty_provider(sid, coord, knife_edges):
+                return {}  # knows no codes
+
+            res = verify_his.verify_station(
+                SID,
+                ws.tob_dir,
+                ws.qcu_dir,
+                ws.qcf_dir,
+                ws.solutions,
+                ws.inv,
+                empty_provider,
+            )
+        self.assertFalse(res.exact_tob)
+        self.assertGreater(res.n_mismatch, 0)
+        self.assertTrue(any(s.startswith("no-basis@") for s in res.samples))
+
     def test_verbatim_station(self):
         with tempfile.TemporaryDirectory() as td:
             ws = _Workspace(Path(td))
@@ -237,6 +275,40 @@ class TestVerify(unittest.TestCase):
         self.assertTrue(res.resegmented)
         self.assertTrue(res.exact_pha)
         self.assertEqual(res.n_mismatch, 0)
+
+
+class TestGateTally(unittest.TestCase):
+    """The verification gate must fail the process (exit non-zero) on any
+    mismatched month or per-station error -- otherwise `set -e` pipelines and
+    CI silently accept a non-bit-exact reconstruction."""
+
+    OK = "USQ01\tpha-only\tTrue\tTrue\t0\t0\tno\t"
+    MIS = "USQ02\ttob\tTrue\tFalse\t3\t0\tno\tstale"
+    ERR = "USQ03\tERROR\t-\t-\t-\t-\t-\tRuntimeError: boom"
+
+    @staticmethod
+    def _fails(lines):
+        t = verify_his._tally(lines)
+        return bool(t["n_mis"] or t["n_err"])
+
+    def test_clean_report_passes_gate(self):
+        t = verify_his._tally([self.OK, self.OK])
+        self.assertEqual((t["n_mis"], t["n_err"]), (0, 0))
+        self.assertFalse(self._fails([self.OK, self.OK]))
+
+    def test_mismatch_fails_gate(self):
+        t = verify_his._tally([self.OK, self.MIS])
+        self.assertEqual(t["n_mis"], 3)
+        self.assertTrue(self._fails([self.OK, self.MIS]))
+
+    def test_error_row_fails_gate(self):
+        t = verify_his._tally([self.OK, self.ERR])
+        self.assertEqual(t["n_err"], 1)
+        self.assertTrue(self._fails([self.OK, self.ERR]))
+
+    def test_short_row_counts_as_error(self):
+        # A truncated row (fewer than 7 cols) is an error, not a silent pass.
+        self.assertTrue(self._fails(["USQ04\tpha-only\tTrue"]))
 
 
 if __name__ == "__main__":

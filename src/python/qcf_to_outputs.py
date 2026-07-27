@@ -3,6 +3,7 @@
 
 Fixed-width parsing only. No whitespace parsing. Inventory is ignored.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,7 +20,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert QCF tar.gz to output files")
     parser.add_argument("--qcf-tar", required=True, help="Path to ghcnm.*.qcf.tar.gz")
     parser.add_argument("--base", required=True, help="Base output directory")
-    parser.add_argument("--data-type", help="Optional 1-char data type code between station id and year")
+    parser.add_argument(
+        "--data-type", help="Optional 1-char data type code between station id and year"
+    )
     parser.add_argument("--dry-run", action="store_true", help="Do not write files")
     return parser.parse_args()
 
@@ -35,7 +38,9 @@ def find_dat_member(tar: tarfile.TarFile) -> str:
     return dat_candidates[0]
 
 
-def format_station_line(station_id: str, year: int, values: List[int], flags: List[str], data_type: str) -> str:
+def format_station_line(
+    station_id: str, year: int, values: List[int], flags: List[str], data_type: str
+) -> str:
     parts = [f"{station_id:11s}", data_type, f"{year:4d}"]
     for i in range(12):
         parts.append(f"{values[i]:6d}")
@@ -79,9 +84,9 @@ def write_station_data(
                 line = raw.decode("latin-1", errors="replace")
             if len(line) < 115:
                 continue
-            station_id = line[DAT_ID_SLICE[0]:DAT_ID_SLICE[1]]
-            year_raw = line[DAT_YEAR_SLICE[0]:DAT_YEAR_SLICE[1]]
-            elem = line[DAT_ELEM_SLICE[0]:DAT_ELEM_SLICE[1]]
+            station_id = line[DAT_ID_SLICE[0] : DAT_ID_SLICE[1]]
+            year_raw = line[DAT_YEAR_SLICE[0] : DAT_YEAR_SLICE[1]]
+            elem = line[DAT_ELEM_SLICE[0] : DAT_ELEM_SLICE[1]]
             if elem != "TAVG":
                 continue
             try:
@@ -94,10 +99,10 @@ def write_station_data(
             base = 19
             for month in range(12):
                 offset = base + month * 8
-                value_raw = line[offset:offset + 5]
-                dm = line[offset + 5:offset + 6]
-                qc = line[offset + 6:offset + 7]
-                ds = line[offset + 7:offset + 8]
+                value_raw = line[offset : offset + 5]
+                dm = line[offset + 5 : offset + 6]
+                qc = line[offset + 6 : offset + 7]
+                ds = line[offset + 7 : offset + 8]
                 values.append(parse_value(value_raw))
                 flags.append(parse_flags(dm, qc, ds))
 

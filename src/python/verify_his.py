@@ -184,11 +184,20 @@ def verify_station(
         else:
             rec = inv.get(sid)
             coord = (rec.lat, rec.lon) if rec else (0.0, 0.0)
+        # A TOB station cannot be verified without a basis provider: with no
+        # offsets, every month falls through to "no-basis" and exact_tob would
+        # be a vacuous True.  Fail loud rather than silently pass nothing.
+        if tobo_provider is None:
+            raise ValueError(
+                f"{sid}: cannot verify a TOB station without a tobo_provider "
+                "(the TOB side would report a vacuous pass)"
+            )
         knife = [tuple(k) for k in sol.get("knife_edges", [])]
-        offsets = tobo_provider(sid, coord, knife) if tobo_provider else {}
+        offsets = tobo_provider(sid, coord, knife)
         regimes = sol["regimes"]
         dev_set = {tuple(d[0]) for d in sol.get("deviants", [])}
         tob_bad = 0
+        n_no_basis = 0
         for ym in sorted(set(qcu) & set(t_out)):
             code, blend = _regime_code_for(regimes, ym)
             if blend:
@@ -196,7 +205,13 @@ def verify_station(
                 continue
             expected = 0 if code is None else offsets.get(code, {}).get(tuple(ym))
             if expected is None:
+                # The provider has no offset for this regime's code -- the
+                # month is UNVERIFIED, not exempt.  For a bit-exact gate an
+                # unprovable month is a failure, not a silent pass.
+                n_no_basis += 1
                 audits.append(f"no-basis@{ym[0]}-{ym[1]:02d}")
+                if len(samples) < MISMATCH_SAMPLES:
+                    samples.append(f"no-basis@{ym[0]}-{ym[1]:02d}:code={code}")
                 continue
             if t_out[ym] - qcu[ym] != expected:
                 tob_bad += 1
@@ -204,8 +219,10 @@ def verify_station(
                     samples.append(
                         f"tob@{ym[0]}-{ym[1]:02d}:{t_out[ym] - qcu[ym]}!={expected}"
                     )
-        n_mismatch += tob_bad
-        exact_tob = tob_bad == 0
+        if n_no_basis:
+            audits.append(f"no-basis:{n_no_basis}")
+        n_mismatch += tob_bad + n_no_basis
+        exact_tob = tob_bad == 0 and n_no_basis == 0
 
     # ---- PHA side: qcf == pha_qcf(t_out, S) over solved segments -----------
     exact_pha: Optional[bool] = None
@@ -311,7 +328,30 @@ def _inv_cached(inv_path):
     return _INV
 
 
-def main() -> None:
+def _tally(lines: List[str]) -> Dict[str, int]:
+    """Reduce report rows to gate counters.  A row is an ERROR (counted in
+    ``n_err``) when it is short or its class column is literally ``ERROR``;
+    ``n_mis`` sums the per-station mismatched-month column."""
+    n_err = n_pha_ok = n_tob_ok = n_mis = 0
+    for l in lines:
+        cols = l.split("\t")
+        if len(cols) < 7 or cols[1] == "ERROR":
+            n_err += 1
+            continue
+        n_pha_ok += cols[2] == "True"
+        n_tob_ok += cols[3] == "True"
+        if cols[4].isdigit():
+            n_mis += int(cols[4])
+    return {
+        "n": len(lines),
+        "n_err": n_err,
+        "n_pha_ok": n_pha_ok,
+        "n_tob_ok": n_tob_ok,
+        "n_mis": n_mis,
+    }
+
+
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--tob-dir", default=str(DEF_TOB_DIR))
     ap.add_argument("--qcu-dir", default=str(DEF_QCU_DIR))
@@ -361,25 +401,25 @@ def main() -> None:
     with open(report, "w") as fh:
         fh.write(header + "\n" + "\n".join(lines) + "\n")
 
-    n = len(lines)
-    n_err = 0
-    n_pha_ok = 0
-    n_tob_ok = 0
-    n_mis = 0
-    for l in lines:
-        cols = l.split("\t")
-        if len(cols) < 7 or cols[1] == "ERROR":
-            n_err += 1
-            continue
-        n_pha_ok += cols[2] == "True"
-        n_tob_ok += cols[3] == "True"
-        if cols[4].isdigit():
-            n_mis += int(cols[4])
+    tally = _tally(lines)
     print(
-        f"# verified {n} stations: pha-exact {n_pha_ok}, tob-exact {n_tob_ok}, "
-        f"total mismatched months {n_mis}, errors {n_err} -> {report}"
+        f"# verified {tally['n']} stations: pha-exact {tally['n_pha_ok']}, "
+        f"tob-exact {tally['n_tob_ok']}, total mismatched months "
+        f"{tally['n_mis']}, errors {tally['n_err']} -> {report}"
     )
+
+    # This is a gate: any mismatched month or per-station error must fail the
+    # process so `set -e` pipelines (quickstart_tob.sh, docs/WORKFLOWS.md) and
+    # CI stop rather than silently accept a non-bit-exact reconstruction.
+    if tally["n_mis"] or tally["n_err"]:
+        print(
+            f"# FAIL: {tally['n_mis']} mismatched months across stations, "
+            f"{tally['n_err']} station errors",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

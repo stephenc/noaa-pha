@@ -157,6 +157,44 @@ class TestPhaOnly(unittest.TestCase):
         self.assertTrue(sol.segments[0].s_lo <= s_old <= sol.segments[0].s_hi)
 
 
+class TestQcfSubsetInvariant(unittest.TestCase):
+    """QCF is derived from QCU, so its date set must be a subset of QCU's.
+    A month in QCF but not QCU is physically impossible and almost always a
+    swapped qcu/qcf pair -- prepare_series must fail loud, not carry phantom
+    'qcf-only' deviants downstream."""
+
+    def test_qcf_only_month_raises(self):
+        yms = month_range(1990, 1, 1992, 12)
+        qcu, qcf = synth(7, yms, lambda y, m: OFF_17[m], lambda y, m: 0.0)
+        # A month present in QCF but absent from QCU cannot happen for real.
+        qcf[(1993, 1)] = 1234
+        with self.assertRaises(ValueError) as ctx:
+            rs.prepare_series("USQSWAP0001", qcu, qcf)
+        self.assertIn("1993-01", str(ctx.exception))
+
+    def test_swapped_pair_raises(self):
+        # Swapping the args is the common operator error this guards against:
+        # qcf carries TOB+PHA rounding so it is rarely a subset of qcu.
+        yms = month_range(1990, 1, 1995, 12)
+        qcu, qcf = synth(9, yms, lambda y, m: OFF_07[m], lambda y, m: 0.3)
+        # Only meaningful if the swap actually introduces a qcf-not-in-qcu
+        # month; identical key sets would not (values differ, keys match), so
+        # perturb one key on the (wrongly-passed) qcu side.
+        qcu[(1996, 1)] = 5  # now qcf(=orig qcu) has a month qcu(=orig qcf) lacks
+        with self.assertRaises(ValueError):
+            rs.prepare_series("USQSWAP0002", qcf, qcu)
+
+    def test_qcf_subset_ok(self):
+        # Legitimate case: QCF a strict date-subset of QCU (later months
+        # dropped by QC) must solve without error and yield no qcf-only state.
+        yms = month_range(1990, 1, 1994, 12)
+        qcu, qcf = synth(11, yms, lambda y, m: OFF_17[m], lambda y, m: 0.0)
+        del qcf[(1994, 12)]
+        series = rs.prepare_series("USQSUBSET01", qcu, qcf)
+        self.assertEqual(series.qcf_only, [])
+        self.assertNotIn(rs._mi(1994, 12), series.months)
+
+
 class TestDriverGate(unittest.TestCase):
     """Fix 1: a pure-TOB station must not slip through the PHA-only fast
     path by fragmenting into interval-feasible mini-segments."""
@@ -280,6 +318,48 @@ OFF_15 = {
     11: -7,
     12: -8,
 }
+
+
+class TestFrontierCapAudit(unittest.TestCase):
+    """The PARETO_CAP frontier eviction is a lexicographic heuristic that can
+    drop the optimal path.  It must not do so silently: any search that hits
+    the cap sets `capped`, surfaced downstream as a `frontier-capped` audit."""
+
+    def _bracket_inputs(self):
+        yms = month_range(1900, 1, 2019, 12)
+        s_vals = [0.31, -0.22, 0.44, 0.11, -0.35, 0.27, 0.0]
+        breaks = [((1915 + 15 * k, 1), fp32.f32(v)) for k, v in enumerate(s_vals)]
+        s_fn = _step_s_fn([((1900, 1), fp32.f32(0.18))] + breaks)
+
+        def tobo_fn(y, m):
+            if (y, m) < (1907, 1) or (y, m) >= (2016, 3):
+                return 0
+            if (y, m) < (1950, 1):
+                return OFF_17[m]
+            return OFF_07[m]
+
+        basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
+        qcu, qcf = synth(40, yms, tobo_fn, s_fn)
+        return qcu, qcf, basis
+
+    def test_cap_sets_capped_flag(self):
+        from unittest import mock
+
+        qcu, qcf, basis = self._bracket_inputs()
+        series = rs.prepare_series("SYNCAP", qcu, qcf)
+        # A cap of 1 forces frontier pressure on this 8-changepoint shape.
+        with mock.patch.object(rs, "PARETO_CAP", 1):
+            res = rs._solve_with_basis(series, basis, True)
+        self.assertIsNotNone(res)
+        self.assertTrue(res["capped"])
+
+    def test_normal_solve_not_capped(self):
+        # Under the default cap this shape solves exactly with no frontier
+        # pressure, so the audit must be absent -- the marker means something.
+        qcu, qcf, basis = self._bracket_inputs()
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNCAP")
+        self.assertTrue(sol.exact)
+        self.assertNotIn("frontier-capped", sol.audits)
 
 
 class TestDeviantClusters(unittest.TestCase):

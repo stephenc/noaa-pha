@@ -22,8 +22,15 @@ def _boundary(kind="record-start", **kw):
     return th.Boundary(kind=kind, **kw)
 
 
-def _evid(cls="residual-proven", codes=("17HR",), runs=(((1951, 11), (2011, 2)),),
-          n=423, first=(1951, 11), last=(2011, 2), boundary=None):
+def _evid(
+    cls="residual-proven",
+    codes=("17HR",),
+    runs=(((1951, 11), (2011, 2)),),
+    n=423,
+    first=(1951, 11),
+    last=(2011, 2),
+    boundary=None,
+):
     return th.RegimeEvidence(
         cls=cls,
         n_constrained=n,
@@ -52,8 +59,11 @@ def _hints(sid="USC00299085", base="data-oldest", regimes=None, sv=1):
         station_id=sid,
         solver_version=sv,
         provenance=th.Provenance(
-            base=base, generated="2026-07-27T18:04:11Z", kind="tob",
-            exact=True, cost=[0, 0, 0, 4, 0, 0],
+            base=base,
+            generated="2026-07-27T18:04:11Z",
+            kind="tob",
+            exact=True,
+            cost=[0, 0, 0, 4, 0, 0],
         ),
         qcu_hull=((1905, 5), (2011, 2)),
         qcf_hull=((1951, 11), (2011, 2)),
@@ -202,11 +212,22 @@ def _sol_dict(regimes, deviants, ev_regimes, evidence_runs=None, kind="tob"):
     }
 
 
-def _ev_regime(begin=(1950, 1, 1), code="17HR", n=359, codes=("17HR",),
-               runs=(((1950, 1), (1979, 12)),), first=(1950, 1), last=(1979, 12),
-               blend_day=None, boundary_kind="record-start", gap=None,
-               day_resolved=False, day_source=None, feasible=None,
-               hint_influenced=False):
+def _ev_regime(
+    begin=(1950, 1, 1),
+    code="17HR",
+    n=359,
+    codes=("17HR",),
+    runs=(((1950, 1), (1979, 12)),),
+    first=(1950, 1),
+    last=(1979, 12),
+    blend_day=None,
+    boundary_kind="record-start",
+    gap=None,
+    day_resolved=False,
+    day_source=None,
+    feasible=None,
+    hint_influenced=False,
+):
     return {
         "begin": list(begin),
         "code": code,
@@ -239,7 +260,9 @@ class TestHintsFromSolution(unittest.TestCase):
 
     def test_partial_month_deviant_does_not_demote(self):
         sd = _sol_dict(
-            regimes=[{"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}],
+            regimes=[
+                {"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}
+            ],
             deviants=[[[1950, 1], "partial-month-evidence:hiatus-20mo"]],
             ev_regimes=[_ev_regime()],
         )
@@ -249,7 +272,9 @@ class TestHintsFromSolution(unittest.TestCase):
 
     def test_unexplained_deviant_demotes(self):
         sd = _sol_dict(
-            regimes=[{"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}],
+            regimes=[
+                {"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}
+            ],
             deviants=[[[1955, 6], "unexplained"]],
             ev_regimes=[_ev_regime()],
         )
@@ -259,7 +284,9 @@ class TestHintsFromSolution(unittest.TestCase):
 
     def test_ambiguous_class_from_offset_identity(self):
         sd = _sol_dict(
-            regimes=[{"begin": [1950, 1, 1], "end": None, "code": "24HR", "blend_day": None}],
+            regimes=[
+                {"begin": [1950, 1, 1], "end": None, "code": "24HR", "blend_day": None}
+            ],
             deviants=[],
             ev_regimes=[_ev_regime(code="24HR", codes=("24HR", "00HR"))],
         )
@@ -268,7 +295,9 @@ class TestHintsFromSolution(unittest.TestCase):
 
     def test_unconstrained_class(self):
         sd = _sol_dict(
-            regimes=[{"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}],
+            regimes=[
+                {"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}
+            ],
             deviants=[],
             ev_regimes=[_ev_regime(n=0, runs=(), first=None, last=None)],
         )
@@ -277,7 +306,9 @@ class TestHintsFromSolution(unittest.TestCase):
 
     def test_hull_present_value_rule(self):
         sd = _sol_dict(
-            regimes=[{"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}],
+            regimes=[
+                {"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}
+            ],
             deviants=[],
             ev_regimes=[_ev_regime()],
         )
@@ -296,14 +327,19 @@ class TestHintsFromSolution(unittest.TestCase):
             deviants=[],
             ev_regimes=[
                 _ev_regime(
-                    code="17HR", runs=(((1950, 1), (1965, 12)),),
-                    first=(1950, 1), last=(1965, 12),
+                    code="17HR",
+                    runs=(((1950, 1), (1965, 12)),),
+                    first=(1950, 1),
+                    last=(1965, 12),
                 ),
                 _ev_regime(
-                    begin=(1970, 1, 1), code="07HR",
+                    begin=(1970, 1, 1),
+                    code="07HR",
                     runs=(((1970, 1), (1979, 12)),),
-                    first=(1970, 1), last=(1979, 12),
-                    boundary_kind="gap", gap=48,
+                    first=(1970, 1),
+                    last=(1979, 12),
+                    boundary_kind="gap",
+                    gap=48,
                 ),
             ],
         )
@@ -327,18 +363,26 @@ class TestHintsFromSolution(unittest.TestCase):
     def test_laundering_assertion_fires_on_hint_source(self):
         sd = _sol_dict(
             regimes=[
-                {"begin": [1950, 1, 1], "end": None, "code": "17HR",
-                 "blend_day": None, "source": "hint:oldest"}
+                {
+                    "begin": [1950, 1, 1],
+                    "end": None,
+                    "code": "17HR",
+                    "blend_day": None,
+                    "source": "hint:oldest",
+                }
             ],
             deviants=[],
             ev_regimes=[_ev_regime()],
         )
-        with self.assertRaises(AssertionError):
+        # Now an explicit ValueError (was a bare assert) so it survives -O.
+        with self.assertRaises(ValueError):
             self._derive(sd)
 
     def test_round_trips_through_schema(self):
         sd = _sol_dict(
-            regimes=[{"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}],
+            regimes=[
+                {"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}
+            ],
             deviants=[],
             ev_regimes=[_ev_regime()],
         )
@@ -359,7 +403,9 @@ class TestPhase2Laundering(unittest.TestCase):
 
     def test_hint_influenced_demotes_proven(self):
         sd = _sol_dict(
-            regimes=[{"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}],
+            regimes=[
+                {"begin": [1950, 1, 1], "end": None, "code": "17HR", "blend_day": None}
+            ],
             deviants=[],
             ev_regimes=[_ev_regime(hint_influenced=True)],
         )
@@ -368,10 +414,13 @@ class TestPhase2Laundering(unittest.TestCase):
 
     def test_hint_influenced_demotes_ambiguous(self):
         sd = _sol_dict(
-            regimes=[{"begin": [1950, 1, 1], "end": None, "code": "24HR", "blend_day": None}],
+            regimes=[
+                {"begin": [1950, 1, 1], "end": None, "code": "24HR", "blend_day": None}
+            ],
             deviants=[],
-            ev_regimes=[_ev_regime(code="24HR", codes=("24HR", "00HR"),
-                                   hint_influenced=True)],
+            ev_regimes=[
+                _ev_regime(code="24HR", codes=("24HR", "00HR"), hint_influenced=True)
+            ],
         )
         h = self._derive(sd)
         self.assertEqual(h.regimes[0].evidence.cls, "residual-proven-hinted")
@@ -382,20 +431,30 @@ class TestPhase2Laundering(unittest.TestCase):
 
     def test_residual_proven_hinted_not_consolidated(self):
         # A donor regime demoted to residual-proven-hinted is never adopted.
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
-        r = _hr((1951, 11, 1), "17HR", cls="residual-proven-hinted",
-                runs=[((1951, 11), (1960, 12))])
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
+        r = _hr(
+            (1951, 11, 1),
+            "17HR",
+            cls="residual-proven-hinted",
+            runs=[((1951, 11), (1960, 12))],
+        )
         donor = _sh([r])
         res = th.consolidate(
-            residual, "tob", [("d", donor)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            residual,
+            "tob",
+            [("d", donor)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
         )
         self.assertEqual(res.adopted_post, 0)
 
     def test_vintage_hints_from_sets_proven_and_ambiguous(self):
         proven = _hr((1951, 11, 1), "17HR")
-        amb = _hr((1960, 1, 1), "00SS", cls="residual-ambiguous",
-                  codes=["00SS", "18HR"])
+        amb = _hr(
+            (1960, 1, 1), "00SS", cls="residual-ambiguous", codes=["00SS", "18HR"]
+        )
         hinted = _hr((1970, 1, 1), "07HR", cls="residual-proven-hinted")
         partial = _hr((1980, 1, 1), "08HR", cls="residual-partial")
         sh = _sh([proven, amb, hinted, partial])
@@ -427,8 +486,20 @@ class TestDeriveRealSolve(unittest.TestCase):
         import fp32
         import residual_solver as rs
 
-        OFF17 = {1: -6, 2: -6, 3: -7, 4: -6, 5: -5, 6: -4,
-                 7: -3, 8: -3, 9: -4, 10: -5, 11: -5, 12: -6}
+        OFF17 = {
+            1: -6,
+            2: -6,
+            3: -7,
+            4: -6,
+            5: -5,
+            6: -4,
+            7: -3,
+            8: -3,
+            9: -4,
+            10: -5,
+            11: -5,
+            12: -6,
+        }
         OFF24 = {m: 0 for m in range(1, 13)}
         yms = [
             (y, m)
@@ -441,7 +512,7 @@ class TestDeriveRealSolve(unittest.TestCase):
         import random
 
         rng = random.Random(5)
-        for (y, m) in yms:
+        for y, m in yms:
             v = rng.randint(-300, 3200)
             qcu[(y, m)] = v
             qcf[(y, m)] = fp32.pha_qcf(v + OFF17[m], s_era)
@@ -504,25 +575,37 @@ def _codes(regimes):
 
 class TestConsolidation(unittest.TestCase):
     def test_post_hull_adoption_flagship(self):
-        residual = [{"begin": [1905, 5, 1], "end": None, "code": "00SS", "blend_day": None}]
+        residual = [
+            {"begin": [1905, 5, 1], "end": None, "code": "00SS", "blend_day": None}
+        ]
         donor = _sh([_hr((1951, 11, 1), "17HR", runs=[((1951, 11), (2011, 2))])])
         res = th.consolidate(
-            residual, "tob", [("data-oldest", donor)],
-            _vrange(1905, 5, 2011, 12), _vrange(1905, 5, 1944, 7),
+            residual,
+            "tob",
+            [("data-oldest", donor)],
+            _vrange(1905, 5, 2011, 12),
+            _vrange(1905, 5, 1944, 7),
         )
         self.assertTrue(res.adopted_post > 0)
         self.assertEqual(
             _codes(res.regimes),
-            [("00SS", (1905, 5, 1), "residual"),
-             ("17HR", (1951, 11, 1), "hint:data-oldest")],
+            [
+                ("00SS", (1905, 5, 1), "residual"),
+                ("17HR", (1951, 11, 1), "hint:data-oldest"),
+            ],
         )
 
     def test_pre_hull_adoption(self):
-        residual = [{"begin": [1950, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1950, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         donor = _sh([_hr((1940, 1, 1), "18HR", runs=[((1940, 1), (1949, 12))])])
         res = th.consolidate(
-            residual, "tob", [("d", donor)],
-            _vrange(1940, 1, 1959, 12), _vrange(1950, 1, 1959, 12),
+            residual,
+            "tob",
+            [("d", donor)],
+            _vrange(1940, 1, 1959, 12),
+            _vrange(1950, 1, 1959, 12),
         )
         self.assertTrue(res.adopted_pre > 0)
         self.assertEqual(
@@ -531,135 +614,216 @@ class TestConsolidation(unittest.TestCase):
         )
 
     def test_midmonth_begin_day_preserved(self):
-        residual = [{"begin": [1905, 5, 1], "end": None, "code": "00SS", "blend_day": None}]
+        residual = [
+            {"begin": [1905, 5, 1], "end": None, "code": "00SS", "blend_day": None}
+        ]
         # begin day 18 -> effective December; both raw and effective in POST.
         donor = _sh([_hr((1951, 11, 18), "17HR", runs=[((1951, 12), (2011, 2))])])
         res = th.consolidate(
-            residual, "tob", [("d", donor)],
-            _vrange(1905, 5, 2011, 12), _vrange(1905, 5, 1944, 7),
+            residual,
+            "tob",
+            [("d", donor)],
+            _vrange(1905, 5, 2011, 12),
+            _vrange(1905, 5, 1944, 7),
         )
         adopted = [r for r in res.regimes if r["source"] == "hint:d"]
         self.assertEqual(tuple(adopted[0]["begin"]), (1951, 11, 18))
 
     def test_boundary_crossing_disqualifies_window(self):
         # begin day 18 in qcf_last month: effective POST, raw in hull -> refuse.
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         donor = _sh([_hr((1951, 11, 18), "17HR", runs=[((1951, 12), (1960, 1))])])
         res = th.consolidate(
-            residual, "tob", [("d", donor)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1951, 11),
+            residual,
+            "tob",
+            [("d", donor)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1951, 11),
         )
         self.assertEqual(res.adopted_post, 0)
-        self.assertTrue(any("boundary-crossing" in r for r in res.refusals), res.refusals)
+        self.assertTrue(
+            any("boundary-crossing" in r for r in res.refusals), res.refusals
+        )
 
     def test_qcu_clamp_excludes_outside(self):
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         # donor begins 1911 but QCU ends 1910 -> outside span, not adopted.
         donor = _sh([_hr((1911, 1, 1), "18HR", runs=[((1911, 1), (1915, 12))])])
         res = th.consolidate(
-            residual, "tob", [("d", donor)],
-            _vrange(1900, 1, 1910, 12), _vrange(1900, 1, 1909, 12),
+            residual,
+            "tob",
+            [("d", donor)],
+            _vrange(1900, 1, 1910, 12),
+            _vrange(1900, 1, 1909, 12),
         )
         self.assertEqual(res.adopted_post, 0)
 
     def test_missing_qcu_skips(self):
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         donor = _sh([_hr((1911, 1, 1), "18HR")])
-        res = th.consolidate(residual, "tob", [("d", donor)], {}, _vrange(1900, 1, 1909, 12))
+        res = th.consolidate(
+            residual, "tob", [("d", donor)], {}, _vrange(1900, 1, 1909, 12)
+        )
         self.assertEqual(res.adopted_pre + res.adopted_post, 0)
 
     def test_no_qcf_refused(self):
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         donor = _sh([_hr((1911, 1, 1), "18HR")])
-        res = th.consolidate(residual, "tob", [("d", donor)], _vrange(1900, 1, 1920, 12), {})
+        res = th.consolidate(
+            residual, "tob", [("d", donor)], _vrange(1900, 1, 1920, 12), {}
+        )
         self.assertTrue(any("no QCF months" in r for r in res.refusals))
 
     def test_conflict_deadopts_both_leaves_rest(self):
         # Two donors, incompatible proven codes over the same POST months.
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         a = _sh([_hr((1951, 1, 1), "17HR", runs=[((1951, 1), (1960, 12))])], base="A")
         b = _sh([_hr((1951, 1, 1), "18HR", runs=[((1951, 1), (1960, 12))])], base="B")
         res = th.consolidate(
-            residual, "tob", [("A", a), ("B", b)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            residual,
+            "tob",
+            [("A", a), ("B", b)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
         )
         self.assertEqual(res.adopted_post, 0)
         self.assertTrue(any("hint-conflict" in r for r in res.refusals), res.refusals)
 
     def test_precedence_proven_beats_ambiguous(self):
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         # Compatible codes (share 17HR) so precedence, not conflict, decides.
         # Ambiguous donor listed LATER (would win ties) but proven must win.
-        proven = _sh([_hr((1951, 1, 1), "17HR", runs=[((1951, 1), (1960, 12))])], base="P")
+        proven = _sh(
+            [_hr((1951, 1, 1), "17HR", runs=[((1951, 1), (1960, 12))])], base="P"
+        )
         amb = _sh(
-            [_hr((1951, 1, 1), "17HR", cls="residual-ambiguous",
-                 codes=["17HR", "07HR"], runs=[((1951, 1), (1960, 12))])],
+            [
+                _hr(
+                    (1951, 1, 1),
+                    "17HR",
+                    cls="residual-ambiguous",
+                    codes=["17HR", "07HR"],
+                    runs=[((1951, 1), (1960, 12))],
+                )
+            ],
             base="Q",
         )
         res = th.consolidate(
-            residual, "tob", [("P", proven), ("Q", amb)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            residual,
+            "tob",
+            [("P", proven), ("Q", amb)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
         )
         adopted = [r for r in res.regimes if r["source"].startswith("hint")]
         self.assertEqual(adopted[0]["code"], "17HR")
         self.assertEqual(adopted[0]["source"], "hint:P")
 
     def test_later_listed_wins_full_tie(self):
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         # Identical class + identical coverage -> later-listed (j larger) wins.
         run = [((1951, 1), (1960, 12))]
         a = _sh([_hr((1951, 1, 1), "17HR", runs=run)], base="A")
         b = _sh([_hr((1951, 1, 1), "17HR", runs=run)], base="B")
         res = th.consolidate(
-            residual, "tob", [("A", a), ("B", b)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            residual,
+            "tob",
+            [("A", a), ("B", b)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
         )
         adopted = [r for r in res.regimes if r["source"].startswith("hint")]
         self.assertEqual(adopted[0]["source"], "hint:B")
 
     def test_proven_pad_emits_24hr_row(self):
         # POST proven pad claim wins -> explicit 24HR row over held non-pad code.
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "17HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "17HR", "blend_day": None}
+        ]
         pad = _sh([_hr((1951, 1, 1), "00HR", runs=[((1951, 1), (1960, 12))])], base="Z")
         res = th.consolidate(
-            residual, "tob", [("Z", pad)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            residual,
+            "tob",
+            [("Z", pad)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
         )
         adopted = [r for r in res.regimes if r["source"].startswith("hint")]
         self.assertEqual(adopted[0]["code"], "24HR")
 
     def test_ambiguous_refused_when_offsets_diverge(self):
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         amb = _sh(
-            [_hr((1951, 1, 1), "00SS", cls="residual-ambiguous",
-                 codes=["00SS", "18HR"], runs=[((1951, 1), (1960, 12))])]
+            [
+                _hr(
+                    (1951, 1, 1),
+                    "00SS",
+                    cls="residual-ambiguous",
+                    codes=["00SS", "18HR"],
+                    runs=[((1951, 1), (1960, 12))],
+                )
+            ]
         )
         # current offsets diverge for 00SS vs 18HR in summer -> refuse.
         offs = {
             "00SS": {ym: 5 for ym in _vrange(1951, 1, 1960, 12)},
-            "18HR": {ym: (5 if ym[1] in (12, 1, 2) else 9) for ym in _vrange(1951, 1, 1960, 12)},
+            "18HR": {
+                ym: (5 if ym[1] in (12, 1, 2) else 9)
+                for ym in _vrange(1951, 1, 1960, 12)
+            },
         }
         res = th.consolidate(
-            residual, "tob", [("d", amb)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            residual,
+            "tob",
+            [("d", amb)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
             current_offsets=offs,
         )
         self.assertEqual(res.adopted_post, 0)
         self.assertTrue(any("ambiguous-identity-diverges" in r for r in res.refusals))
 
     def test_ambiguous_adopted_when_identity_holds(self):
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         amb = _sh(
-            [_hr((1951, 1, 1), "00SS", cls="residual-ambiguous",
-                 codes=["00SS", "18HR"], runs=[((1951, 1), (1960, 12))])]
+            [
+                _hr(
+                    (1951, 1, 1),
+                    "00SS",
+                    cls="residual-ambiguous",
+                    codes=["00SS", "18HR"],
+                    runs=[((1951, 1), (1960, 12))],
+                )
+            ]
         )
         offs = {
             "00SS": {ym: 5 for ym in _vrange(1951, 1, 1960, 12)},
             "18HR": {ym: 5 for ym in _vrange(1951, 1, 1960, 12)},
         }
         res = th.consolidate(
-            residual, "tob", [("d", amb)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            residual,
+            "tob",
+            [("d", amb)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
             current_offsets=offs,
         )
         self.assertTrue(res.adopted_post > 0)
@@ -667,25 +831,42 @@ class TestConsolidation(unittest.TestCase):
         self.assertEqual(adopted["ambiguous_codes"], ["00SS", "18HR"])
 
     def test_ambiguous_refused_when_offsets_none(self):
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         amb = _sh(
-            [_hr((1951, 1, 1), "00SS", cls="residual-ambiguous",
-                 codes=["00SS", "18HR"], runs=[((1951, 1), (1960, 12))])]
+            [
+                _hr(
+                    (1951, 1, 1),
+                    "00SS",
+                    cls="residual-ambiguous",
+                    codes=["00SS", "18HR"],
+                    runs=[((1951, 1), (1960, 12))],
+                )
+            ]
         )
         res = th.consolidate(
-            residual, "tob", [("d", amb)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            residual,
+            "tob",
+            [("d", amb)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
             current_offsets=None,
         )
         self.assertEqual(res.adopted_post, 0)
 
     def test_in_hull_contradiction_logged_current_wins(self):
-        residual = [{"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}]
+        residual = [
+            {"begin": [1900, 1, 1], "end": None, "code": "07HR", "blend_day": None}
+        ]
         # Donor proven 18HR evidence-backed INSIDE the current hull.
         donor = _sh([_hr((1905, 1, 1), "18HR", runs=[((1905, 1), (1940, 12))])])
         res = th.consolidate(
-            residual, "tob", [("d", donor)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            residual,
+            "tob",
+            [("d", donor)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
         )
         self.assertTrue(any("in-hull-contradiction" in n for n in res.notes), res.notes)
         # Current still wins in-hull.
@@ -697,8 +878,11 @@ class TestConsolidation(unittest.TestCase):
         # pha-only current, exact; donor exterior 17HR -> promote to 24HR hull.
         donor = _sh([_hr((1951, 1, 1), "17HR", runs=[((1951, 1), (1960, 12))])])
         res = th.consolidate(
-            [], "pha-only", [("d", donor)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            [],
+            "pha-only",
+            [("d", donor)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
             promote_pha_only=True,
         )
         self.assertTrue(res.promoted)
@@ -710,15 +894,20 @@ class TestConsolidation(unittest.TestCase):
     def test_pha_only_inert_without_promote(self):
         donor = _sh([_hr((1951, 1, 1), "17HR", runs=[((1951, 1), (1960, 12))])])
         res = th.consolidate(
-            [], "pha-only", [("d", donor)],
-            _vrange(1900, 1, 1960, 12), _vrange(1900, 1, 1950, 12),
+            [],
+            "pha-only",
+            [("d", donor)],
+            _vrange(1900, 1, 1960, 12),
+            _vrange(1900, 1, 1950, 12),
             promote_pha_only=False,
         )
         self.assertFalse(res.promoted)
         self.assertEqual(res.regimes, [])
 
     def test_no_adoption_is_residual_only(self):
-        residual = [{"begin": [1905, 5, 1], "end": None, "code": "00SS", "blend_day": None}]
+        residual = [
+            {"begin": [1905, 5, 1], "end": None, "code": "00SS", "blend_day": None}
+        ]
         res = th.consolidate(
             residual, "tob", [], _vrange(1905, 5, 2011, 12), _vrange(1905, 5, 1944, 7)
         )
@@ -780,14 +969,20 @@ class TestConsolidateCLI(unittest.TestCase):
         paths["inv"].write_text(
             f"{sid:<11s} {40.0:8.4f} {-100.0:9.4f} {300.0:6.1f} TEST\n"
         )
-        _write_station_data(paths["raw"] / f"{sid}.raw.tavg", sid, _mrange(1905, 5, 2011, 12))
-        _write_station_data(paths["qcf"] / f"{sid}.qcf.tavg", sid, _mrange(1905, 5, 1944, 7))
+        _write_station_data(
+            paths["raw"] / f"{sid}.raw.tavg", sid, _mrange(1905, 5, 2011, 12)
+        )
+        _write_station_data(
+            paths["qcf"] / f"{sid}.qcf.tavg", sid, _mrange(1905, 5, 1944, 7)
+        )
         # Residual solution: single 00SS regime, with evidence.
         sol = {
             "station_id": sid,
             "kind": "tob",
             "coord_index": 0,
-            "regimes": [{"begin": [1905, 5, 1], "end": None, "code": "00SS", "blend_day": None}],
+            "regimes": [
+                {"begin": [1905, 5, 1], "end": None, "code": "00SS", "blend_day": None}
+            ],
             "segments": [],
             "deviants": [],
             "knife_edges": [],
@@ -801,9 +996,15 @@ class TestConsolidateCLI(unittest.TestCase):
                 "solver_version": 1,
                 "kind": "tob",
                 "evidence_runs": [[[1905, 5], [1944, 7]]],
-                "regimes": [_ev_regime(begin=(1905, 5, 1), code="00SS",
-                                       runs=(((1905, 5), (1944, 7)),),
-                                       first=(1905, 5), last=(1944, 7))],
+                "regimes": [
+                    _ev_regime(
+                        begin=(1905, 5, 1),
+                        code="00SS",
+                        runs=(((1905, 5), (1944, 7)),),
+                        first=(1905, 5),
+                        last=(1944, 7),
+                    )
+                ],
             },
         }
         (paths["solutions"] / f"{sid}.json").write_text(json.dumps(sol, indent=1))

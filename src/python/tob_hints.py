@@ -200,7 +200,9 @@ class Boundary:
     kind: str  # "constrained" | "gap" | "record-start"
     gap_months_before: Optional[int] = None
     day_resolved: bool = False
-    day_source: Optional[str] = None  # search-blend | two-blend-repair | magnitude-refined
+    day_source: Optional[str] = (
+        None  # search-blend | two-blend-repair | magnitude-refined
+    )
     feasible_days: Optional[List[int]] = None
 
     def to_dict(self) -> dict:
@@ -258,9 +260,7 @@ class RegimeEvidence:
         return {
             "class": self.cls,
             "n_constrained": self.n_constrained,
-            "constrained_runs": [
-                [_ml(a), _ml(b)] for a, b in self.constrained_runs
-            ],
+            "constrained_runs": [[_ml(a), _ml(b)] for a, b in self.constrained_runs],
             "first_constrained": _ml(self.first_constrained),
             "last_constrained": _ml(self.last_constrained),
             "ambiguous_codes": list(self.ambiguous_codes),
@@ -342,10 +342,14 @@ class HintRegime:
             raise HintFormatError(f"{where}: malformed blend_day {bd!r}")
         return cls(
             begin=_as_date(d.get("begin"), f"{where}.begin"),
-            end=None if d.get("end") is None else _as_date(d.get("end"), f"{where}.end"),
+            end=(
+                None if d.get("end") is None else _as_date(d.get("end"), f"{where}.end")
+            ),
             code=code.strip().upper(),
             blend_day=bd,
-            evidence=RegimeEvidence.from_dict(d.get("evidence", {}), f"{where}.evidence"),
+            evidence=RegimeEvidence.from_dict(
+                d.get("evidence", {}), f"{where}.evidence"
+            ),
         )
 
 
@@ -405,12 +409,16 @@ class StationHints:
             "solver_version": self.solver_version,
             "station_id": self.station_id,
             "provenance": self.provenance.to_dict(),
-            "qcu_hull": None
-            if self.qcu_hull is None
-            else [_ml(self.qcu_hull[0]), _ml(self.qcu_hull[1])],
-            "qcf_hull": None
-            if self.qcf_hull is None
-            else [_ml(self.qcf_hull[0]), _ml(self.qcf_hull[1])],
+            "qcu_hull": (
+                None
+                if self.qcu_hull is None
+                else [_ml(self.qcu_hull[0]), _ml(self.qcu_hull[1])]
+            ),
+            "qcf_hull": (
+                None
+                if self.qcf_hull is None
+                else [_ml(self.qcf_hull[0]), _ml(self.qcf_hull[1])]
+            ),
             "evidence_runs": [[_ml(a), _ml(b)] for a, b in self.evidence_runs],
             "regimes": [r.to_dict() for r in self.regimes],
             "deviants": [_ml(m) for m in self.deviants],
@@ -588,9 +596,17 @@ def hints_from_solution(
     month is not demoted (§4.4).
     """
     regimes_in = sol_dict.get("regimes", [])
-    assert all(
-        r.get("source", "residual") == "residual" for r in regimes_in
-    ), "hints_from_solution must only ever see residual regimes (§6.7 inv. 1)"
+    # Load-bearing no-laundering guard (§6.7 invariant 1): a consolidated
+    # (donor-adopted) regime reaching this path would be re-exported as
+    # independent evidence.  Raise (not assert -- must survive `python -O`).
+    laundered = [
+        r.get("source") for r in regimes_in if r.get("source", "residual") != "residual"
+    ]
+    if laundered:
+        raise ValueError(
+            "hints_from_solution must only ever see residual regimes "
+            f"(§6.7 inv. 1); got non-residual source(s): {sorted(set(laundered))}"
+        )
 
     ev = sol_dict.get("evidence") or {}
     ev_regimes = ev.get("regimes", [])
@@ -648,7 +664,9 @@ def hints_from_solution(
             ambiguous_codes=amb,
             flutter_months=[tuple(m) for m in er.get("flutter_months", [])],
             deviant_months=[(mi // 12, mi % 12 + 1) for mi in span_dev],
-            boundary=Boundary.from_dict(er.get("boundary", {}), f"evidence.regimes[{k}]"),
+            boundary=Boundary.from_dict(
+                er.get("boundary", {}), f"evidence.regimes[{k}]"
+            ),
         )
         begin = tuple(er["begin"])
         hint_regimes.append(
@@ -674,13 +692,9 @@ def hints_from_solution(
         provenance=prov,
         qcu_hull=_present_hull(qcu_values),
         qcf_hull=_present_hull(qcf_values),
-        evidence_runs=[
-            (tuple(a), tuple(b)) for a, b in ev.get("evidence_runs", [])
-        ],
+        evidence_runs=[(tuple(a), tuple(b)) for a, b in ev.get("evidence_runs", [])],
         regimes=hint_regimes,
-        deviants=sorted(
-            {(mi // 12, mi % 12 + 1) for mi in demoting_mis}
-        ),
+        deviants=sorted({(mi // 12, mi % 12 + 1) for mi in demoting_mis}),
         audits=[],
     )
 
@@ -708,7 +722,9 @@ def vintage_hints_from_sets(
     out: List[Tuple[Ymd, str]] = []
     for _tag, hints in hint_sets:
         for r in hints.regimes:
-            if r.evidence.cls not in ADOPTABLE_CLASSES or not is_valid_code_label(r.code):
+            if r.evidence.cls not in ADOPTABLE_CLASSES or not is_valid_code_label(
+                r.code
+            ):
                 continue
             if r.evidence.cls == "residual-ambiguous":
                 for c in r.evidence.ambiguous_codes:
@@ -910,12 +926,26 @@ def consolidate(
             ym = _ym_add(ym, 1)
 
     adopted_pre_regs, n_pre = _consolidate_window(
-        views, _in_pre, "pre", first_qcu, _ym_add(qcf_first, -1),
-        current_offsets, qcu_set, refusals, notes,
+        views,
+        _in_pre,
+        "pre",
+        first_qcu,
+        _ym_add(qcf_first, -1),
+        current_offsets,
+        qcu_set,
+        refusals,
+        notes,
     )
     adopted_post_regs, n_post = _consolidate_window(
-        views, _in_post, "post", _ym_add(qcf_last, 1), last_qcu,
-        current_offsets, qcu_set, refusals, notes,
+        views,
+        _in_post,
+        "post",
+        _ym_add(qcf_last, 1),
+        last_qcu,
+        current_offsets,
+        qcu_set,
+        refusals,
+        notes,
     )
 
     # Assemble: PRE adopted + current in-hull + POST adopted, in time order.
@@ -1048,9 +1078,7 @@ def _consolidate_window(
 
     # Precedence (§6.3 step 5): (best class rank, n window months e-backed, j).
     def _score(v: "_HintView") -> Tuple[int, int, int]:
-        best_rank = max(
-            _CLASS_RANK.get(r.evidence.cls, 0) for r in eligible[v.j]
-        )
+        best_rank = max(_CLASS_RANK.get(r.evidence.cls, 0) for r in eligible[v.j])
         n_e = sum(1 for ym in win_months if v.e(ym))
         return (best_rank, n_e, v.j)
 
@@ -1064,7 +1092,9 @@ def _consolidate_window(
     # Adopt the primary's non-de-adopted regimes with effective begin in-window,
     # in time order.  Following h_primary between begins is exactly holding the
     # previous adopted code (emission truncates), so we emit the regimes only.
-    adopt_regs = sorted(eligible[primary.j], key=lambda r: _effective_begin_month(r.begin))
+    adopt_regs = sorted(
+        eligible[primary.j], key=lambda r: _effective_begin_month(r.begin)
+    )
     out: List[Tuple[Ymd, str, Optional[int], str, Optional[List[str]]]] = []
     covered = 0
     for idx, r in enumerate(adopt_regs):
@@ -1140,8 +1170,10 @@ def _months_inclusive(a: Ym, b: Ym) -> List[Ym]:
 def _dedupe_consecutive(regimes: List[dict]) -> List[dict]:
     out: List[dict] = []
     for r in regimes:
-        if out and out[-1]["code"] == r["code"] and out[-1].get("blend_day") == r.get(
-            "blend_day"
+        if (
+            out
+            and out[-1]["code"] == r["code"]
+            and out[-1].get("blend_day") == r.get("blend_day")
         ):
             continue
         out.append(r)
@@ -1253,9 +1285,7 @@ def cmd_consolidate(paths: dict, args) -> int:
         if not conus:
             continue
 
-        hint_sets = load_hint_sets(
-            args.hint_dirs, sid, solver_version=None, log=print
-        )
+        hint_sets = load_hint_sets(args.hint_dirs, sid, solver_version=None, log=print)
         if not hint_sets:
             continue
 
@@ -1279,8 +1309,7 @@ def cmd_consolidate(paths: dict, args) -> int:
         new_sol["audits"] = [
             a
             for a in sol.get("audits", [])
-            if not a.startswith("hints-consolidated")
-            and a != "hint-promoted-pha-only"
+            if not a.startswith("hints-consolidated") and a != "hint-promoted-pha-only"
         ]
         emit_kind = source_kind
         if cons.adopted_pre or cons.adopted_post:

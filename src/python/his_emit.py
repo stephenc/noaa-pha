@@ -42,6 +42,16 @@ MAX_CODE_CHANGES = 200  # TOBMain MAX_CHANGES
 
 _DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
+# Feet per metre, used to derive .his elevation from station.inv metres.
+_FT_PER_M = 3.28084
+
+
+def _nint(x: float) -> int:
+    """Fortran NINT: round half AWAY from zero (not Python's round(), which is
+    banker's / half-to-even).  A station sitting exactly on a half-foot must
+    land on the same integer the genuine v3 .his does, or the row differs."""
+    return int(x + 0.5) if x >= 0 else int(x - 0.5)
+
 
 def _leap(y: int) -> bool:
     return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
@@ -110,7 +120,7 @@ def emit_station_his(
         )
 
     if inv.elev_m is not None:
-        elev_ft = int(round(inv.elev_m * 3.28084))
+        elev_ft = _nint(inv.elev_m * _FT_PER_M)
     else:
         elev_ft = 0
 
@@ -304,7 +314,7 @@ def emit_metadata_his(
                 break
         return cur
 
-    inv_elev_ft = int(round(inv.elev_m * 3.28084)) if inv.elev_m is not None else 0
+    inv_elev_ft = _nint(inv.elev_m * _FT_PER_M) if inv.elev_m is not None else 0
 
     rows = []  # (begin, obs_code, dms, elev_ft, distdir)
     for date in boundaries:
@@ -315,7 +325,7 @@ def emit_metadata_his(
         else:
             dms = ghcn_io.dms_quantize(inv.lat, inv.lon)
         elev_ft = (
-            int(round(m.elev_ft))
+            _nint(m.elev_ft)
             if (m is not None and m.elev_ft is not None)
             else inv_elev_ft
         )

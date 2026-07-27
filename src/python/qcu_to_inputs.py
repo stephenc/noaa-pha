@@ -3,13 +3,13 @@
 
 Fixed-width parsing only. No whitespace parsing.
 """
+
 from __future__ import annotations
 
 import argparse
 import tarfile
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
-
 
 INV_ID_SLICE = (0, 11)
 INV_LAT_SLICE = (12, 20)
@@ -27,7 +27,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base", required=True, help="Base output directory")
     parser.add_argument("--version", default="v4", help="Version string (max 4 chars)")
     parser.add_argument("--begin-year", type=int, default=1700, help="pha.begin-year")
-    parser.add_argument("--data-type", help="Optional 1-char data type code between station id and year")
+    parser.add_argument(
+        "--data-type", help="Optional 1-char data type code between station id and year"
+    )
     parser.add_argument("--dry-run", action="store_true", help="Do not write files")
     return parser.parse_args()
 
@@ -66,7 +68,9 @@ def find_members(tar: tarfile.TarFile) -> Tuple[str, str]:
     return dat_candidates[0], inv_candidates[0]
 
 
-def write_inventory(tar: tarfile.TarFile, inv_member: str, out_path: Path, dry_run: bool) -> int:
+def write_inventory(
+    tar: tarfile.TarFile, inv_member: str, out_path: Path, dry_run: bool
+) -> int:
     count = 0
     if dry_run:
         with tar.extractfile(inv_member) as fh:
@@ -92,7 +96,9 @@ def write_inventory(tar: tarfile.TarFile, inv_member: str, out_path: Path, dry_r
     return count
 
 
-def format_station_line(station_id: str, year: int, values: List[int], flags: List[str], data_type: str) -> str:
+def format_station_line(
+    station_id: str, year: int, values: List[int], flags: List[str], data_type: str
+) -> str:
     parts = [f"{station_id:11s}", data_type, f"{year:4d}"]
     for i in range(12):
         parts.append(f"{values[i]:6d}")
@@ -136,9 +142,9 @@ def write_station_data(
                 line = raw.decode("latin-1", errors="replace")
             if len(line) < 115:
                 continue
-            station_id = line[DAT_ID_SLICE[0]:DAT_ID_SLICE[1]]
-            year_raw = line[DAT_YEAR_SLICE[0]:DAT_YEAR_SLICE[1]]
-            elem = line[DAT_ELEM_SLICE[0]:DAT_ELEM_SLICE[1]]
+            station_id = line[DAT_ID_SLICE[0] : DAT_ID_SLICE[1]]
+            year_raw = line[DAT_YEAR_SLICE[0] : DAT_YEAR_SLICE[1]]
+            elem = line[DAT_ELEM_SLICE[0] : DAT_ELEM_SLICE[1]]
             if elem != "TAVG":
                 continue
             try:
@@ -151,10 +157,10 @@ def write_station_data(
             base = 19
             for month in range(12):
                 offset = base + month * 8
-                value_raw = line[offset:offset + 5]
-                dm = line[offset + 5:offset + 6]
-                qc = line[offset + 6:offset + 7]
-                ds = line[offset + 7:offset + 8]
+                value_raw = line[offset : offset + 5]
+                dm = line[offset + 5 : offset + 6]
+                qc = line[offset + 6 : offset + 7]
+                ds = line[offset + 7 : offset + 8]
                 values.append(parse_value(value_raw))
                 flags.append(parse_flags(dm, qc, ds))
 
@@ -189,11 +195,16 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
         f"pha.version = {version}",
         "",
         "pha.path.station-history = " + str(base / "intermediate" / "history") + "/",
-        "pha.path.station-element-data-out = " + str(base / "output" / "adj" / "tavg") + "/",
+        "pha.path.station-element-data-out = "
+        + str(base / "output" / "adj" / "tavg")
+        + "/",
         "",
-        "pha.path.neighbors.distance = " + str(base / "output" / "neighbor-distance.txt"),
-        "pha.path.neighbors.correlation = " + str(base / "output" / "neighbor-correlation.txt"),
-        "pha.path.neighbors.correlation-in = " + str(base / "output" / "neighbor-correlation.txt"),
+        "pha.path.neighbors.distance = "
+        + str(base / "output" / "neighbor-distance.txt"),
+        "pha.path.neighbors.correlation = "
+        + str(base / "output" / "neighbor-correlation.txt"),
+        "pha.path.neighbors.correlation-in = "
+        + str(base / "output" / "neighbor-correlation.txt"),
         "",
         "pha.neighbors.distance-neighbor-limit = 40",
         "pha.neighbors.final-neighbor-limit = 20",
@@ -216,7 +227,9 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
         "pha.do-run-neighbors = true",
     ]
 
-    def write_prop(path: Path, input_type: str, neighbors_type: str, include_tob: bool) -> None:
+    def write_prop(
+        path: Path, input_type: str, neighbors_type: str, include_tob: bool
+    ) -> None:
         # The TOB stage is an intermediate between input/ and output/: its
         # per-station data and its station list live under intermediate/.
         # The intermediate station.inv (written by qcf_to_outputs.py) is
@@ -238,21 +251,27 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
             f"pha.neighbors.input-data-type = {neighbors_type}",
         ]
         if include_tob:
-            lines.extend([
-                "tob.start-year = 1895",
-                "tob.start-from-history = true",
-                "tob.input-data-type = raw",
-                "tob.backfill-if-first-nonblank = false",
-                "tob.pause-on-blank-after-nonblank = false",
-                "tob.path.station-element-data-in = " + str(base / "input" / "raw" / "tavg") + "/",
-                "tob.path.station-element-data-out = " + str(base / "intermediate" / "tob" / "tavg") + "/",
-                "tob.logger.filename = " + str(base / "output" / "tob.log"),
-                "tob.logger.level = INFO",
-                "tob.logger.print-to-stdout = false",
-                "tob.logger.append-datestamp = true",
-                "tob.logger.rollover-datestamp = false",
-                "tob.use-his-lat-lon = false",
-            ])
+            lines.extend(
+                [
+                    "tob.start-year = 1895",
+                    "tob.start-from-history = true",
+                    "tob.input-data-type = raw",
+                    "tob.backfill-if-first-nonblank = false",
+                    "tob.pause-on-blank-after-nonblank = false",
+                    "tob.path.station-element-data-in = "
+                    + str(base / "input" / "raw" / "tavg")
+                    + "/",
+                    "tob.path.station-element-data-out = "
+                    + str(base / "intermediate" / "tob" / "tavg")
+                    + "/",
+                    "tob.logger.filename = " + str(base / "output" / "tob.log"),
+                    "tob.logger.level = INFO",
+                    "tob.logger.print-to-stdout = false",
+                    "tob.logger.append-datestamp = true",
+                    "tob.logger.rollover-datestamp = false",
+                    "tob.use-his-lat-lon = false",
+                ]
+            )
         if dry_run:
             return
         with path.open("w", encoding="utf-8") as fh:

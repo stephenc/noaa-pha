@@ -215,11 +215,24 @@ def prepare_series(
     qcf: Dict[Tuple[int, int], int],
     qcf_flags: Optional[Dict[Tuple[int, int], str]] = None,
 ) -> Series:
+    # QCF is derived from QCU (TOB + PHA applied to existing QCU points), so
+    # its date set is always a subset of QCU's -- a month present in QCF but
+    # absent from QCU is physically impossible and almost always means a caller
+    # swapped the qcu/qcf pair.  Fail loud and fast rather than silently carry
+    # phantom "qcf-only" deviants downstream.
+    qcf_extra = set(qcf) - set(qcu)
+    if qcf_extra:
+        sample = ", ".join(f"{y}-{m:02d}" for y, m in sorted(qcf_extra)[:5])
+        raise ValueError(
+            f"{sid or 'station'}: {len(qcf_extra)} month(s) present in QCF but "
+            f"not QCU ({sample}{', ...' if len(qcf_extra) > 5 else ''}); QCF must "
+            f"be a date-subset of QCU -- are the qcu/qcf inputs swapped?"
+        )
     common = sorted(set(qcu) & set(qcf), key=lambda ym: _mi(*ym))
     months = [_mi(*ym) for ym in common]
     t_raw = [qcu[ym] for ym in common]
     q = [qcf[ym] for ym in common]
-    qcf_only = sorted(_mi(*ym) for ym in set(qcf) - set(qcu))
+    qcf_only: List[int] = []
     visible = {_mi(*ym) for ym in qcf}
     if qcf_flags:
         for ym, fl in qcf_flags.items():
@@ -477,7 +490,14 @@ def _dp_resegment(
         for i in idxs:
             t = series.t_raw[i] + (tobo[i] if tobo is not None else 0)
             iv = _isect(iv, _psi(t, series.q[i]))
-        assert iv is not None
+        # The DP only cut at feasible split points, so every rebuilt segment
+        # must have a non-empty S-interval; an empty one means a corrupt
+        # solution.  Raise (not assert -- must survive `python -O`).
+        if iv is None:
+            raise AssertionError(
+                f"empty S-interval for resegmented block {idxs}: DP invariant "
+                "violated"
+            )
         segs.append(_Seg(idxs, iv))
         p = pj
     if seed_zero and segs:
@@ -1021,6 +1041,14 @@ def _solve_with_basis(
 
     best = None
     pops = 0
+    # Set once the bounded frontier (PARETO_CAP) is forced to drop or evict a
+    # state.  The eviction is a lexicographic heuristic that CAN discard the
+    # optimal path (see comment at the eviction site); surfacing it as a
+    # ``frontier-capped`` audit turns that silent risk into a greppable one so
+    # a solution built under frontier pressure is never mistaken for a proven
+    # optimum.  This does not change which state wins -- only records that the
+    # cap was hit on the way there.
+    capped = False
     # dominance: per (i, code) keep pareto list of (cost, iv)
     seen: Dict[Tuple[int, str], List[Tuple[Tuple, Interval]]] = {}
     while heap:
@@ -1053,7 +1081,9 @@ def _solve_with_basis(
             # incomparable cost tuples accumulate.  Evict (or reject) by
             # lexicographic cost -- best-first order means later arrivals at
             # the same (position, code) with lexicographically larger cost
-            # are almost never on the optimal path.
+            # are almost never on the optimal path.  "Almost never" is not
+            # "never": this is where the optimum can be lost, so flag it.
+            capped = True
             worst_idx = max(range(len(plist)), key=lambda k: plist[k][0])
             if plist[worst_idx][0] <= st.cost:
                 continue
@@ -1232,7 +1262,7 @@ def _solve_with_basis(
 
     if best is None:
         return None
-    return {"state": best, "pops": pops}
+    return {"state": best, "pops": pops, "capped": capped}
 
 
 # A switch target must explain a single-S run this long from the branch
@@ -1919,6 +1949,8 @@ def _solve_tob_station_impl(
             sol.stats["pops"] = res["pops"]
             if deep:
                 sol.audits.append("deep-search")
+            if res.get("capped"):
+                sol.audits.append("frontier-capped")
             if allow_noblend and any(
                 why == "blend-unresolved" for _ym2, why in sol.deviants
             ):
@@ -1948,6 +1980,8 @@ def _solve_tob_station_impl(
                     if sol2 is not None and _rank_key(sol2) < _rank_key(sol):
                         sol2.stats["pops"] = res2["pops"]
                         sol2.audits.append("no-blend-rerun")
+                        if res2.get("capped"):
+                            sol2.audits.append("frontier-capped")
                         sol = sol2
             if ke_patch is not None:
                 sol.knife_edges.append(ke_patch)
@@ -2130,6 +2164,8 @@ def _solve_tob_station_impl(
             )
             if sol is not None and sol.exact and not sol.deviants:
                 sol.audits.append("hint-upgrade")
+                if res.get("capped"):
+                    sol.audits.append("frontier-capped")
                 best_sol = sol
                 break
 
