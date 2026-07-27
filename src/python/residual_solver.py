@@ -827,9 +827,13 @@ def _solution_evidence(
             mi for mi in dev_mis if begin_mi <= mi and (next_mi is None or mi < next_mi)
         )
         span_flut = sorted(
-            mi for mi in flut_mis if begin_mi <= mi and (next_mi is None or mi < next_mi)
+            mi
+            for mi in flut_mis
+            if begin_mi <= mi and (next_mi is None or mi < next_mi)
         )
-        influenced = bool(sol.hint_influenced) and tuple(reg.begin) in sol.hint_influenced
+        influenced = (
+            bool(sol.hint_influenced) and tuple(reg.begin) in sol.hint_influenced
+        )
         out_regimes.append(
             {
                 "begin": list(reg.begin),
@@ -970,6 +974,7 @@ def _solve_with_basis(
         if hc is None or hc not in tobos:
             return codes
         return [hc] + [c for c in codes if c != hc]
+
     n = len(series.months)
     if n == 0:
         return None
@@ -1727,7 +1732,6 @@ def solve_tob_station(
     sid: str = "",
     hints: Optional[List[Tuple[Tuple[int, int, int], str]]] = None,
     vintage_hints: Optional[List[Tuple[Tuple[int, int, int], str]]] = None,
-    edge_mis: Optional[frozenset] = None,
 ) -> Solution:
     """Full TOB+PHA decomposition; bases is a list of tob_basis.Basis.
 
@@ -1751,10 +1755,10 @@ def solve_tob_station(
     evidence block from the chosen coordinate's basis on the way out.
     """
     series = prepare_series(sid, qcu, qcf, qcf_flags)
-    sol = _solve_tob_station_impl(series, bases, blend_fn, sid, hints, None, edge_mis)
+    sol = _solve_tob_station_impl(series, bases, blend_fn, sid, hints, None)
     if vintage_hints:
         hinted = _solve_tob_station_impl(
-            series, bases, blend_fn, sid, hints, vintage_hints, edge_mis
+            series, bases, blend_fn, sid, hints, vintage_hints
         )
         sol = _select_hint_influenced(sol, hinted)
     if sol.coord_index is not None:
@@ -1806,7 +1810,6 @@ def _solve_tob_station_impl(
     sid: str,
     hints: Optional[List[Tuple[Tuple[int, int, int], str]]],
     vintage_hints: Optional[List[Tuple[Tuple[int, int, int], str]]] = None,
-    edge_mis: Optional[frozenset] = None,
 ) -> Solution:
     upfront = [(_ym(mi), "qcf-only-month") for mi in series.qcf_only]
     # §9.2: vintage hints merge into hint_mis and the tie-break machinery.
@@ -1878,7 +1881,10 @@ def _solve_tob_station_impl(
             if pop_spent > POP_BUDGET and best_sol is not None:
                 return None
             res = _solve_with_basis(
-                series, use_basis, seed_zero, hint_mis=hint_mis,
+                series,
+                use_basis,
+                seed_zero,
+                hint_mis=hint_mis,
                 hint_code_at=hint_code_at,
             )
             deep = False
@@ -1920,7 +1926,11 @@ def _solve_tob_station_impl(
                 # rerun without the blend branch -- a trial-regime reading
                 # the blend was shadowing may now win outright.
                 res2 = _solve_with_basis(
-                    series, use_basis, seed_zero, no_blend=True, hint_mis=hint_mis,
+                    series,
+                    use_basis,
+                    seed_zero,
+                    no_blend=True,
+                    hint_mis=hint_mis,
                     hint_code_at=hint_code_at,
                 )
                 if res2 is not None:
@@ -2155,13 +2165,6 @@ def _solve_tob_station_impl(
     if best_sol.coord_index is not None and blend_fn is not None and combined_hints:
         best_sol = _boundary_magnitude_refine(
             series, bases[best_sol.coord_index], best_sol, combined_hints, blend_fn
-        )
-    # Prefer an edge deviant over a short obs-time flip at a record edge /
-    # hiatus / QCF-constraint-gap restart (physical parsimony over exactness).
-    if best_sol.coord_index is not None and blend_fn is not None and edge_mis:
-        best_sol = _deflip_short_edge_regimes(
-            series, bases[best_sol.coord_index], best_sol, edge_mis, upfront,
-            blend_fn, sid,
         )
     # Document compiler-divergence candidates on the PLAIN winner: the
     # patched reading is never emitted, but the evidence (a +-1 cell patch
@@ -3023,9 +3026,7 @@ _DEMOTING_WHY = ("unexplained", "blend-unresolved", "no-single-S", "repair-merge
 
 def _dev_month_set(sol: Solution) -> frozenset:
     """Demoting-deviant (y, m) months of a solution (flutter is exempt)."""
-    return frozenset(
-        (y, m) for (y, m), why in sol.deviants if why in _DEMOTING_WHY
-    )
+    return frozenset((y, m) for (y, m), why in sol.deviants if why in _DEMOTING_WHY)
 
 
 def _reconstruct_package_inputs(series: Series, sol: Solution):
@@ -3090,8 +3091,17 @@ def _repackage_incumbent(series, basis, sol, upfront, blend_fn, sid):
         if any(c is None for c in code_at):
             return None
         return _package_solution(
-            series, basis, sol.coord_index, code_at, dev_set, blends,
-            seed_zero, upfront, blend_fn, sid, flutter_set=flut,
+            series,
+            basis,
+            sol.coord_index,
+            code_at,
+            dev_set,
+            blends,
+            seed_zero,
+            upfront,
+            blend_fn,
+            sid,
+            flutter_set=flut,
         )
     except Exception:
         return None
@@ -3175,123 +3185,6 @@ def _hinted_boundary_retry(
                 )
                 return cand
     return sol
-
-
-DEFLIP_MAX_SPAN = 3  # a "short flip" spans at most this many months
-# Dissolving a short edge flip may leave AT MOST this many genuinely
-# unexplained (non-edge) deviants; more means the flip encodes real structure
-# (the months fit the flip code), so it is kept.
-DEFLIP_MAX_UNEXEMPT = 1
-
-
-def _segment_iv_covering(sol: Solution, mi: int) -> Optional[Interval]:
-    for s in sol.segments:
-        if _mi(*s.begin) <= mi <= _mi(*s.end):
-            return Interval(s.s_lo, s.s_hi)
-    return None
-
-
-def _deflip_short_edge_regimes(
-    series: Series,
-    basis,
-    sol: Solution,
-    edge_mis: frozenset,
-    upfront,
-    blend_fn,
-    sid: str,
-) -> Solution:
-    """Prefer an edge deviant over a short obs-time flip at a record edge /
-    hiatus / QCF-constraint-gap restart.
-
-    A physical station does not switch obs time for 2-3 months right where the
-    constrained record restarts after a long gap; such a short flip is a
-    boundary artifact the search prefers only because a 0-deviant reading
-    outranks a fewer-regime reading that carries a deviant (and PHA's 18-month
-    minimum forbids absorbing the odd months as a short level).  This pass
-    dissolves such a flip into its neighbouring code, forcing the months that
-    then miss the neighbour's PHA level (by interval, not tolerance) to become
-    deviants -- a simpler, still verify-green reading (the deviants are
-    PHA-exempt via the solution's deviant set and TOB-reproduced).  Fires ONLY
-    when the flip BEGINS at an edge/hiatus month and the result is structurally
-    simpler with no new hard/soft-short segments."""
-    if sol.coord_index is None or len(sol.regimes) < 2 or not edge_mis:
-        return sol
-    tobos = _tobo_arrays(series, basis)
-    pos = {mi: i for i, mi in enumerate(series.months)}
-    cur = sol
-    for _ in range(len(sol.regimes)):  # bounded: at most one dissolve per pass
-        regs = sorted(cur.regimes, key=lambda r: r.begin)
-        if len(regs) < 2:
-            break
-        code_at, dev_set, flut, blends, seed_zero = _reconstruct_package_inputs(
-            series, cur
-        )
-        if any(c is None for c in code_at):
-            break
-        cur_dev = _dev_month_set(cur)
-        applied = False
-        for k, r in enumerate(regs):
-            bmi = _mi(r.begin[0], r.begin[1])
-            if bmi not in edge_mis:
-                continue  # flip must begin at an edge/hiatus/restart month
-            # Prefer extending the NEXT regime's code back (restart case);
-            # fall back to the previous regime at the record tail.
-            if k + 1 < len(regs):
-                nxt = regs[k + 1]
-                nbmi = _mi(nxt.begin[0], nxt.begin[1])
-                ncode = nxt.code
-                # absorb the next regime's blend month when it has one
-                span_hi_mi = nbmi if nxt.blend_day else nbmi - 1
-                probe_mi = nbmi + 1
-            elif k > 0:
-                prv = regs[k - 1]
-                ncode = prv.code
-                span_hi_mi = series.months[-1]
-                probe_mi = bmi - 1
-            else:
-                continue
-            if ncode == r.code:
-                continue
-            if span_hi_mi - bmi > DEFLIP_MAX_SPAN:
-                continue
-            nseg = _segment_iv_covering(cur, probe_mi)
-            span_pos = [i for i, mi in enumerate(series.months) if bmi <= mi <= span_hi_mi]
-            if not span_pos:
-                continue
-            alt = list(code_at)
-            force = set()
-            arr = tobos.get(ncode)
-            for i in span_pos:
-                alt[i] = ncode
-                off = arr[i] if arr is not None else None
-                iv = _psi(series.t_raw[i] + off, series.q[i]) if off is not None else None
-                if nseg is None or iv is None or _isect(iv, nseg) is None:
-                    force.add(i)
-            alt_blends = [b for b in blends if not (bmi <= series.months[b[0]] <= span_hi_mi)]
-            cand = _package_solution(
-                series, basis, sol.coord_index, alt, dev_set | force, alt_blends,
-                seed_zero, upfront, blend_fn, sid, flutter_set=flut,
-            )
-            if cand is None:
-                continue
-            new_dev = _dev_month_set(cand) - cur_dev
-            n_unexempt = sum(1 for (y, m) in new_dev if _mi(y, m) not in edge_mis)
-            if (
-                len(cand.regimes) < len(regs)
-                and cand.cost[0] <= cur.cost[0]
-                and cand.cost[5] <= cur.cost[5]
-                and all(bmi <= _mi(y, m) <= span_hi_mi for (y, m) in new_dev)
-                and n_unexempt <= DEFLIP_MAX_UNEXEMPT
-            ):
-                cand.audits.append(
-                    f"deflip-edge@{r.begin[0]:04d}-{r.begin[1]:02d}:{r.code}->{ncode}"
-                )
-                cur = cand
-                applied = True
-                break
-        if not applied:
-            break
-    return cur
 
 
 def _knife_edge_retry(

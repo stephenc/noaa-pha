@@ -131,59 +131,41 @@ HIATUS_MIN_MONTHS = (
 )
 
 
-def _edge_positions(raw_values, qcf_values, dataset_last):
-    """month-index -> partial-month label for record edges / hiatus / QCF
-    constraint-gap restarts / dataset-last (the positions where an isolated
-    deviant is a partial month, not real structure).
-
-    Two kinds of gap qualify: a HIATUS in the RAW record (no data at all for
-    >= HIATUS_MIN_MONTHS -- QC-flagged data counts as data), and a
-    QCF-CONSTRAINT gap (QCU present but QCF absent for >= HIATUS_MIN_MONTHS --
-    the residual solve has no anchor across it, so the month where constraints
-    resume is a restart edge)."""
-    out = {}  # mi -> label
-    # RAW hiatus first (no data at all is the stronger signal), then a
-    # QCF-constraint gap only where the raw record did not already flag one.
-    raw_mis = sorted(y * 12 + (m - 1) for (y, m) in raw_values)
-    for a, b in zip(raw_mis, raw_mis[1:]):
-        gap = b - a - 1
-        if gap >= HIATUS_MIN_MONTHS:
-            out[a] = f"hiatus-{gap}mo"
-            out[b] = f"hiatus-{gap}mo"
-    common = sorted(set(raw_values) & set(qcf_values))
-    if common:
-        cmis = [y * 12 + (m - 1) for (y, m) in common]
-        for a, b in zip(cmis, cmis[1:]):
-            gap = b - a - 1
-            if gap >= HIATUS_MIN_MONTHS:
-                out.setdefault(a, f"qcf-gap-{gap}mo")
-                out.setdefault(b, f"qcf-gap-{gap}mo")
-    if dataset_last is not None:
-        out.setdefault(dataset_last[0] * 12 + (dataset_last[1] - 1), "dataset-last")
-    return out
-
-
 def classify_partial_months(sol, raw_values, qcf_values, mshr_recs, dataset_last):
     """Partial-month exemption rule: relabel a deviant as
     'partial-month-evidence:<...>' ONLY with evidence -- (a) it is the
-    dataset-wide last month, (b) it is the single month adjacent to a raw
-    hiatus or a QCF-constraint-gap restart of >= HIATUS_MIN_MONTHS months
-    (see ``_edge_positions``), or (c) it is the station's record edge AND an
-    MSHR period boundary falls strictly inside that month.  Everything else
-    stays a regular deviant."""
+    dataset-wide last month, (b) it is the station's record edge AND an
+    MSHR period boundary falls strictly inside that month, or (c) it is the
+    single month immediately BEFORE or AFTER a continuous hiatus of
+    >= HIATUS_MIN_MONTHS calendar months with zero data in the raw record
+    (a month present with any value, even QC-flagged, breaks the hiatus) --
+    the trailing/leading month of a collection stop/restart is typically a
+    partial month.  Everything else stays a regular deviant."""
     if not sol.deviants:
         return
     common = sorted(set(raw_values) & set(qcf_values))
     if not common:
         return
     edges = {common[0], common[-1]}
-    positions = _edge_positions(raw_values, qcf_values, dataset_last)
+    # Hiatus adjacency computed on the RAW record: months with any value
+    # present (even QC-flagged) count as data.
+    raw_mis = sorted(y * 12 + (m - 1) for (y, m) in raw_values)
+    hiatus_adjacent = {}  # month-index -> gap length (calendar months)
+    for a, b in zip(raw_mis, raw_mis[1:]):
+        gap = b - a - 1
+        if gap >= HIATUS_MIN_MONTHS:
+            hiatus_adjacent[a] = gap  # single trailing month before the gap
+            hiatus_adjacent[b] = gap  # single leading month after the gap
     relabeled = []
     for ym, why in sol.deviants:
         ymt = tuple(ym)
         mi = ymt[0] * 12 + (ymt[1] - 1)
-        evidence = positions.get(mi)
-        if evidence is None and ymt in edges:
+        evidence = None
+        if dataset_last is not None and ymt == tuple(dataset_last):
+            evidence = "dataset-last"
+        elif mi in hiatus_adjacent:
+            evidence = f"hiatus-{hiatus_adjacent[mi]}mo"
+        elif ymt in edges:
             for rec in mshr_recs or []:
                 for b in (rec.begin, rec.end):
                     if (
@@ -286,12 +268,6 @@ def solve_station(
         # When that basis is unusable (e.g. mict<5), the solver still runs
         # so it produces its no-solution reading.
         inv_bases = runner.get_bases(sid, raw_path, coords)
-        # Record-edge / hiatus / QCF-constraint-gap positions where a lone
-        # deviant is a partial month, not real structure -- lets the solver
-        # prefer an edge deviant over a short obs-time flip at a restart.
-        edge_mis = frozenset(
-            _edge_positions(raw.values, qcf.values, _DATASET_LAST)
-        )
         tob_sol = rs.solve_tob_station(
             raw.values,
             qcf.values,
@@ -301,7 +277,6 @@ def solve_station(
             sid=sid,
             hints=hints,
             vintage_hints=vintage_hints,
-            edge_mis=edge_mis,
         )
         if prefer_tob(sol, tob_sol):
             sol = tob_sol
