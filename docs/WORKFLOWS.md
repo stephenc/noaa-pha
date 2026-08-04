@@ -15,9 +15,15 @@ curl -o ./data/phr.txt.zip https://www.ncei.noaa.gov/access/homr/file/phr.txt.zi
 curl -o ./data/mshr_enhanced.txt.zip https://www.ncei.noaa.gov/access/homr/file/mshr_enhanced.txt.zip
 ```
 
-The `latest` QCU and QCF files change daily. For a fixed vintage, use NOAA's
-dated archive, which starts at 2026-04-29:
+The `latest` QCU and QCF files change daily and carry no date. For a fixed
+vintage, use NOAA's dated archive:
 <https://www.ncei.noaa.gov/data/global-historical-climatology-network-monthly/v4/temperature/archive/>
+
+A new vintage appears there on most days. The page holds about 90 days of
+them. Older vintages are no longer available for download.
+
+Thus capture is urgent. Keep a copy of each vintage that you process, and take
+a new one regularly. A vintage that nobody kept cannot be recovered.
 
 HOMR does not put a date on `phr.txt.zip` or `mshr_enhanced.txt.zip`. Keep the
 copy that you used. `src/python/fetch_homr.py` downloads these two files and
