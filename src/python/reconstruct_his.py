@@ -739,6 +739,15 @@ def main() -> None:
         args.his_dir = str(base / "intermediate" / "history")
     if args.summary_file is None:
         args.summary_file = str(base / "intermediate" / "summary.tsv")
+    # A metadata path given EXPLICITLY on the command line must exist.  On a
+    # typo'd or absent path the run would otherwise fall through to the "no
+    # evidence" branch and still exit 0, which degrades the whole pass: no
+    # partial-month evidence for the CONUS solve, and no metadata histories at
+    # all.  Auto-discovery below may find nothing, because it only ever assigns
+    # a path that already exists.
+    for flag, value in (("--mshr-zip", args.mshr_zip), ("--phr-zip", args.phr_zip)):
+        if value is not None and not Path(value).is_file():
+            sys.exit("%s: no such file: %s" % (flag, value))
     if args.mshr_zip is None and (base / "mshr_enhanced.txt.zip").exists():
         args.mshr_zip = str(base / "mshr_enhanced.txt.zip")
     if args.phr_zip is None and (base / "phr.txt.zip").exists():
