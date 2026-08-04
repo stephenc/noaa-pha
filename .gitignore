@@ -8,3 +8,4 @@
 # Local go build output (real product is bin/PHAview via `make phaview`)
 /src/go/viewer
 /kstn.out
+/local/
