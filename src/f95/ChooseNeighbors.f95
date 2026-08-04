@@ -854,6 +854,13 @@ contains
           target_first_diffs(i) = target_values(i)
           neigh_first_diffs(i) = neigh_values(i)
         end do
+        ! The full-series branch must also calculate and assign the
+        ! correlation. Without these two lines the branch fills the arrays but
+        ! keeps the correlation from the previous neighbour. In F77
+        ! ushcn_corr.v5a.combo.f the array fill and the correl call are two
+        ! separate if-blocks, and full series works correctly.
+        correlation = calculate_correlation(good_values_count, target_first_diffs, neigh_first_diffs)
+        station_corr_neighbors(k)%correlation = correlation
       endif
     end do correlation_loop
 
