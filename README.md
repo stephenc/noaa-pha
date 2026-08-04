@@ -91,13 +91,22 @@ python3 src/python/qcf_to_outputs.py --qcf-tar data/ghcnm.tavg.latest.qcf.tar.gz
 
 NOAA does not publish these.  The reconstructor derives bit-exact CONUS
 histories from the QCU/QCF residuals (requires `bin/TOBMain` built with
-`TRIG_BACKEND=llvm-exact`, steps 1-3 done) and metadata-derived histories
-for non-CONUS stations from MSHR/PHR; it takes roughly 15-20 minutes at the
-default parallelism:
+`TRIG_BACKEND=llvm-exact`, steps 1-3 done), documents observation-time months
+the residuals leave unconstrained from PHR, and takes the remaining `.his`
+fields from MSHR/PHR:
 
 ```bash
 uv run python src/python/reconstruct_his.py
 ```
+
+Add `--hints <dir>` once per prior-vintage hint set to consume a hint databank.
+A TOB regime can only be *proven* where QCF constrains it, so QCU months with no
+QCF value are beyond this vintage's reach.  Different archive vintages retain
+and remove different segments, so a month exposed in none of them here may be
+exposed in another; a hint databank imports what those vintages could prove, and
+widens coverage accordingly.  It does not make the result authoritative — what
+no vintage proves is documented from PHR/HOMR, which is documentation, not
+evidence.  See `src/python/README.md` for the CLI surface.
 
 5. Generate TOB-adjusted monthly data, then run PHA:
 

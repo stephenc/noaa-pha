@@ -44,11 +44,31 @@ python3 src/python/qcf_to_outputs.py \
 The station history files (`data/intermediate/history/*.his`) are not published
 by NOAA.  Reconstruct them with `uv run python src/python/reconstruct_his.py`
 (after the input/output layout is built and `bin/TOBMain` is compiled with
-`TRIG_BACKEND=llvm-exact`): CONUS histories are solver-derived bit-exact
-from the QCU/QCF residuals where the solver reports `exact=True`; non-CONUS
-histories are metadata-derived from the MSHR/PHR records. The same command
-provisions `data/intermediate/` (`history/`, filtered `station.inv`, and
-`tob/tavg` out-dir) required by `tob.properties`.
+`TRIG_BACKEND=llvm-exact`).  Pass `--hints <dir>` once per prior-vintage hint
+set to consume a hint databank; the run then needs no further pass:
+
+`--hints` takes one directory and is repeatable, so a databank is passed as one
+flag per vintage:
+
+```bash
+args=(); for d in /path/to/hintstore/*/; do args+=(--hints "$d"); done
+uv run python src/python/reconstruct_his.py --base data "${args[@]}" --jobs 11
+```
+
+CONUS histories are solver-derived bit-exact from the QCU/QCF residuals where
+the solver reports `exact=True`.  That evidence reaches only as far as QCF does:
+a QCU month with no QCF value carries no residual to decompose, so this vintage
+cannot resolve its observation time.  Which segments PHA retains and removes
+differs from vintage to vintage, so such a month may well carry a QCF value in
+another one — that is what a hint databank buys, importing regimes other
+vintages could prove into the months this one cannot reach.  Coverage is
+therefore bounded by the vintages available, not closed by them.
+
+What no vintage proves is documented rather than derived: observation times from
+PHR, the non-TOB fields from HOMR, and metadata-derived rows for stations NOAA
+is responsible for that have no TOB solve.  The same command provisions
+`data/intermediate/` (`history/`, filtered `station.inv`, and `tob/tavg`
+out-dir) required by `tob.properties`.
 
 Optional after a TOBMain run: verify that TOB output matches the stored
 solutions bit-exactly (not required for normal use):

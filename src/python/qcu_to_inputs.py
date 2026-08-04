@@ -206,11 +206,39 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
         "pha.path.neighbors.correlation-in = "
         + str(base / "output" / "neighbor-correlation.txt"),
         "",
-        "pha.neighbors.distance-neighbor-limit = 40",
-        "pha.neighbors.final-neighbor-limit = 20",
+        # Neighbour configuration. NOT the PHA source defaults (40/20/7) --
+        # these are the values recovered for GHCN-M v4 and they are load-bearing:
+        # the five below decide which stations PHA ever compares, so reverting
+        # them moves the result far more than any post-neighbour knob, which
+        # only reweights an already-fixed set. distance/final-limit are
+        # corroborated externally by O'Neill et al. (2022), which describes the
+        # operational PHA as using "40 out of 100 nearest neighbors"; method,
+        # min-coefficient and min-station-coverage are falsified in both
+        # directions against the sentinels described below.
+        #
+        # min-station-coverage deserves particular care: perturbing it barely
+        # shows in aggregate output, yet it disturbs more sentinels than any
+        # other parameter tested. An alternative that looks harmless in the
+        # aggregate is not thereby safe.
+        "pha.neighbors.distance-neighbor-limit = 100",
+        "pha.neighbors.final-neighbor-limit = 40",
         "pha.neighbors.method = first-diffs",
-        "pha.neighbors.min-station-coverage = 7",
+        "pha.neighbors.min-station-coverage = 14",
         "pha.neighbors.min-coefficient = 0.1",
+        # Post-neighbour parameters. Each has been enumerated in both directions
+        # across several input landscapes and is peaked at the value below
+        # (adjust.window is limiting rather than peaked: every finite window
+        # loses to unlimited). Pairwise interactions are real but saturating,
+        # so no combination recovers what a single wrong value costs.
+        #
+        # SENTINELS. Every parameter here carries a falsification, not just an
+        # optimisation. A sentinel is a station that reproduces the published
+        # QCF exactly and is fed only by neighbours that also do; if a value
+        # were wrong, such a station could not stay exact. An alternative is
+        # falsified when it changes a sentinel's changepoint set. The control
+        # matters as much as the test: rebuilding the network at the values
+        # below disturbs no sentinel, so the instrument is not firing on
+        # nothing. Do not "tidy" these.
         "pha.snht-threshold = 5",
         "pha.bic-penalty = bic",
         "pha.amploc-percent = 92",

@@ -7,13 +7,31 @@ JSON solution per station under work/<tag>/solutions, and renders history
 files into <base>/intermediate/history:
 
   * CONUS TOB stations: solver-derived regime rows (bit-exact timelines).
-  * CONUS pure-PHA stations: NO file -- TOBMain copies the input verbatim
-    when no history exists, which is numerically identical and avoids
-    seeding a PHA first-record changepoint that NOAA's pipeline never had.
-  * Non-CONUS stations with HOMR records: metadata-derived rows (documented
-    locations, elevations and observation times from MSHR-enhanced + PHR);
-    TOBMain verbatim-copies these stations, the rows serve PHA's
-    documented-changepoint reader.
+  * CONUS COOP stations with no TOB solve: metadata-derived rows, so their
+    documented moves reach PHA (--no-coop-history writes no file).
+    COOP-only; see emit_coop_histories.
+  * Other CONUS pure-PHA stations: NO file -- TOBMain copies the input
+    verbatim when no history exists, which is numerically identical, and a
+    file here would seed a PHA first-record changepoint with nothing behind
+    it.
+  * Non-CONUS stations NOAA is responsible for (US id, or a multi-record
+    HOMR operational history) with HOMR records: metadata-derived rows
+    (documented locations, elevations and observation times from
+    MSHR-enhanced + PHR); TOBMain verbatim-copies these stations, the rows
+    serve PHA's documented-changepoint reader.  --no-us-responsible widens
+    this to every station with HOMR records.
+
+Given a hint databank and the HOMR seed metadata, one invocation is the whole
+recovery: solve, PHR fill, metadata rows and emission policy all run in-process,
+with no post-passes and no TOB round-trip.
+
+That is a statement about the pipeline, not about the result.  A regime is
+proven only where QCF constrains it; a QCU month with no QCF value carries no
+residual to decompose.  Vintages differ in which segments PHA retains and
+removes, so a month out of reach here may be exposed in another, and donor hints
+import what those vintages could prove.  The residue is documented from PHR and
+HOMR -- documentation, not evidence.  More vintages widen the proven fraction;
+none of them close it.
 
 The run also provisions the pipeline's intermediate stage directory
 (<base>/intermediate/, owned by this driver + TOBMain): history/, the TOB
@@ -221,8 +239,8 @@ def solve_station(
     inv_bases = None  # chosen-coord bases, when the TOB gate ran (for §6.4)
 
     # Donor hints (loaded once, reused for consolidation).  By default (Phase
-    # 2, §9) they also influence the SOLVE via vintage_hints; --no-vintage-hints
-    # restores v1 behaviour (consolidation only, outside the QCF hull).
+    # 2, §9) they also influence the SOLVE via vintage_hints; with
+    # --no-vintage-hints they act only at consolidation, outside the QCF hull.
     hint_sets = []
     if _HINT_DIRS and conus:
         hint_sets = tob_hints.load_hint_sets(
@@ -373,10 +391,10 @@ def solve_station(
         json.dump(d, fh, indent=1)
     os.replace(tmp, final)
 
-    # Pure-PHA CONUS stations get NO .his file: TOBMain copies the input
-    # verbatim when no history exists (numerically identical, byte-safe),
-    # and an artificial 00HR-only file would seed a PHA first-record
-    # changepoint NOAA's pipeline never had.  00HR rows appear only where a
+    # Pure-PHA CONUS stations get NO .his file here: TOBMain copies the input
+    # verbatim when no history exists (numerically identical, byte-safe), and
+    # an artificial 00HR-only file would seed a PHA first-record changepoint
+    # with no documented event behind it.  00HR rows appear only where a
     # TOB solve genuinely required bracketing (his_emit's first-row rule).
     # Rows carry the CHOSEN coordinate (constant across rows -> no spurious
     # PHA changepoints; correct for tob.use-his-lat-lon=true validation runs).
@@ -384,6 +402,20 @@ def solve_station(
     # (documented locations/elevations/obs times); TOBMain verbatim-copies
     # them regardless, so TOB outputs are unaffected -- the rows exist for
     # PHA's documented-changepoint reader.
+    # Which stations get a metadata history is a US-RESPONSIBILITY question,
+    # not a geographic one: NOAA maintains US-territory and overseas-base
+    # stations too, and HOMR holds a multi-record operational history for
+    # exactly those.  A single-record foreign station yields a flat stub that
+    # documents nothing and costs PHA a first-record changepoint.  The rule
+    # reads only the id and the HOMR record count -- independent of QCF and of
+    # whether any changepoint results -- so it cannot be tuned against the
+    # target (--no-us-responsible emits for every station with HOMR records).
+    # The CONUS gate implies a US id, so this only prunes the non-CONUS branch.
+    phr_recs = _PHR_CACHE.get(sid) if _PHR_CACHE else None
+    mshr_recs = _MSHR_CACHE.get(sid) if _MSHR_CACHE else None
+    us_responsible = (
+        not _US_RESPONSIBLE_ONLY or sid.startswith("US") or len(mshr_recs or ()) > 1
+    )
     if emit_his and conus and kind == "tob" and d["regimes"]:
         out_dir = his_dir or (REPO / "work" / "history")
         first_year = raw.years[0] if raw.years else 1895
@@ -395,9 +427,7 @@ def solve_station(
         ]
         dms = ghcn_io.dms_quantize(*chosen_coord)
         his_emit.emit_station_his(sid, regimes, dms, inv, out_dir, first_year)
-    elif emit_his and not conus:
-        phr_recs = _PHR_CACHE.get(sid) if _PHR_CACHE else None
-        mshr_recs = _MSHR_CACHE.get(sid) if _MSHR_CACHE else None
+    elif emit_his and not conus and us_responsible:
         if phr_recs or mshr_recs:
             out_dir = his_dir or (REPO / "work" / "history")
             his_emit.emit_metadata_his(
@@ -418,12 +448,81 @@ def solve_station(
     return sid, summary
 
 
+def emit_coop_histories(base: Path, his_dir: Path) -> None:
+    """Give CONUS COOP stations with no TOB solve a metadata history.
+
+    The solve emits solver-derived rows for a CONUS station with a TOB timeline
+    and metadata rows for a non-CONUS one, so a CONUS station with neither
+    matches no branch.  Without this pass its documented moves never reach PHA.
+    Emission goes through the same ``emit_metadata_his`` path non-CONUS stations
+    use, so the two are treated alike.
+
+    COOP only: USR/USS/USW records are longer, denser and carry appreciably
+    more changepoints each, so undated-provenance rows give PHA more
+    opportunities to split a segment that should stay whole, where the shorter,
+    sparser COOP records mostly cannot.
+
+    Ordering is load-bearing: this runs after the PHR fill and the metadata
+    rows.  Those passes repair the fields ``emit_station_his`` writes flat; the
+    files written here are HOMR-derived already, and putting them through the
+    same passes would rewrite fields that are correct as emitted.
+
+    These stations sit INSIDE the TOB gate, so the history must span the whole
+    record (``cover_leading_months``).  TOBMain applies sunset, not midnight, to
+    months no record covers, and HOMR documentation routinely begins after the
+    data does -- an uncovered leading span would therefore carry a TOB
+    adjustment.  Every station reaching this function solved as pha-only, which
+    is a positive finding of NO adjustment anywhere in its record, so such a
+    span would contradict the residual evidence.
+    """
+    inv = ghcn_io.read_inventory(base / "intermediate" / "station.inv")
+    have = {p.name.split(".")[0] for p in his_dir.glob("*.his")}
+    missing = sorted(
+        s
+        for s in inv
+        if s.startswith("USC")
+        and s not in have
+        and (RAW_DIR / f"{s}.raw.tavg").is_file()
+    )
+    mshr = ghcn_io.read_mshr(base / "mshr_enhanced.txt.zip", set(missing))
+    phr = ghcn_io.read_phr(base / "phr.txt.zip", set(missing))
+    written = skipped = 0
+    for sid in missing:
+        m, p = mshr.get(sid), phr.get(sid)
+        if not m and not p:
+            skipped += 1
+            continue
+        vals = ghcn_io.read_station_data(RAW_DIR / f"{sid}.raw.tavg").values
+        if not vals:
+            skipped += 1
+            continue
+        out = his_emit.emit_metadata_his(
+            sid,
+            p,
+            m,
+            inv[sid],
+            his_dir,
+            first_data=min(vals),
+            cover_leading_months=True,
+        )
+        if out is None:
+            skipped += 1
+        else:
+            written += 1
+    print(
+        "# COOP histories written: %d (candidates %d, skipped %d)"
+        % (written, len(missing), skipped),
+        flush=True,
+    )
+
+
 _INV_CACHE = None
 _MSHR_CACHE: Optional[dict] = None
 _PHR_CACHE: Optional[dict] = None
 _DATASET_LAST: Optional[Tuple[int, int]] = None
 # Set in main() before the fork pool; inherited copy-on-write by workers.
 _NO_HINTS_OUT: bool = False
+_US_RESPONSIBLE_ONLY: bool = True
 _BASE_NAME: str = "data"
 _RUN_STAMP: str = ""
 # Consolidation (Stage 4): donor hint dirs (--hints) and pha-only promotion.
@@ -556,9 +655,10 @@ def main() -> None:
         action="append",
         default=None,
         metavar="DIR",
-        help="donor hints directory to CONSOLIDATE from (repeatable, e.g. "
-        "data-oldest/intermediate/hints); extends timelines OUTSIDE this "
-        "vintage's QCF hull only -- the solve is never hint-influenced in v1",
+        help="donor hints directory (repeatable, e.g. a hintstore vintage or "
+        "data-oldest/intermediate/hints).  Hints influence the solve and "
+        "extend timelines outside this vintage's QCF hull at consolidation; "
+        "--no-vintage-hints limits them to the latter",
     )
     ap.add_argument(
         "--promote-pha-only",
@@ -579,8 +679,49 @@ def main() -> None:
         help="Phase 2 (§9) is ON by default when --hints is given: donor "
         "hints INFLUENCE the solve (enumeration preference + hinted-boundary "
         "retry), and policy adoptions export as class residual-proven-hinted "
-        "(never re-adoptable).  Pass this flag to disable it (v1 behaviour: "
-        "hints act only at consolidation, outside the QCF hull)",
+        "(never re-adoptable).  Pass this flag to disable it, leaving hints to "
+        "act only at consolidation, outside the QCF hull",
+    )
+    # --- post-solve passes (on by default; see the module docstring) ---------
+    ap.add_argument(
+        "--phr-fill-regions",
+        default="pre,interior,post",
+        help="which residual-unconstrained regions PHR may document: any "
+        "comma-separated subset of pre,interior,post (default: all).  PHR "
+        "never overrides the current vintage's solve or an adopted hint",
+    )
+    ap.add_argument(
+        "--no-phr-fill",
+        action="store_true",
+        help="skip the PHR observation-time fill, leaving residual-"
+        "unconstrained months to carry the synthetic 00HR pad",
+    )
+    ap.add_argument(
+        "--no-metadata-rows",
+        action="store_true",
+        help="keep the flattened non-TOB .his fields.  By default coordinates, "
+        "elevation, relocations and instruments are taken from HOMR so that a "
+        "PHA run with use-history-files=1 sees the documented changepoints; "
+        "pass this for a strictly TOB-only history",
+    )
+    ap.add_argument(
+        "--no-us-responsible",
+        action="store_true",
+        help="emit a metadata history for EVERY non-CONUS station with HOMR "
+        "records.  By default emission is restricted to the stations NOAA is "
+        "responsible for (US id, or a multi-record HOMR operational history, "
+        "which is what US territories and the overseas base network have); the "
+        "rest yield flat stubs that document nothing and cost PHA a "
+        "first-record changepoint",
+    )
+    ap.add_argument(
+        "--no-coop-history",
+        action="store_true",
+        help="leave CONUS COOP stations with no TOB solve without a history "
+        "file.  By default they get one from HOMR via the same path non-CONUS "
+        "stations use, so their documented moves reach PHA; COOP-only, because "
+        "the longer, denser USR/USS/USW records give PHA more opportunities to "
+        "split a segment that should stay whole",
     )
     args = ap.parse_args()
 
@@ -634,8 +775,9 @@ def main() -> None:
     # Hints export + consolidation config, set before the fork pool so
     # workers inherit it copy-on-write (like the PHR/MSHR caches).
     global _NO_HINTS_OUT, _BASE_NAME, _RUN_STAMP, _HINT_DIRS, _PROMOTE_PHA_ONLY
-    global _VINTAGE_HINTS_ON
+    global _VINTAGE_HINTS_ON, _US_RESPONSIBLE_ONLY
     _NO_HINTS_OUT = args.no_hints_out
+    _US_RESPONSIBLE_ONLY = not args.no_us_responsible
     _BASE_NAME = tag
     _PROMOTE_PHA_ONLY = args.promote_pha_only
     _VINTAGE_HINTS_ON = not args.no_vintage_hints
@@ -706,6 +848,51 @@ def main() -> None:
         # pipeline would differ byte-for-byte between runs.
         with open(args.summary_file, "w") as fh:
             fh.write("\n".join(sorted(lines)) + "\n")
+
+    # ---- post-passes over the emitted timeline -------------------------------
+    # These run in-process so `reconstruct_his.py --base <dir>` stays the single
+    # command that turns QCU + QCF + metadata (+ donor hints) into histories.
+    # Each is idempotent and reads only what the solve already wrote, so any
+    # can be re-run alone against a finished base to retune policy without
+    # repeating the (hours-long) solve.
+    if args.no_emit:
+        return
+
+    if not args.no_phr_fill:
+        import phr_fill
+
+        print("# --- PHR fill (regions=%s) ---" % args.phr_fill_regions, flush=True)
+        rc = phr_fill.main(
+            [
+                "--base",
+                str(base),
+                "--regions",
+                args.phr_fill_regions,
+                "--report",
+                str(base / "intermediate" / "phr_fill.tsv"),
+            ]
+        )
+        if rc != 0:
+            raise SystemExit(f"phr fill failed (rc={rc})")
+
+    if not args.no_metadata_rows:
+        import his_metadata
+
+        print("# --- metadata rows (HOMR non-TOB fields) ---", flush=True)
+        rc = his_metadata.main(
+            [
+                "--base",
+                str(base),
+                "--report",
+                str(base / "intermediate" / "his_metadata.tsv"),
+            ]
+        )
+        if rc != 0:
+            raise SystemExit(f"metadata rows failed (rc={rc})")
+
+    if not args.no_coop_history:
+        print("# --- COOP histories (CONUS, no TOB solve) ---", flush=True)
+        emit_coop_histories(base, Path(args.his_dir))
 
 
 if __name__ == "__main__":

@@ -40,6 +40,11 @@ from ghcn_io import DmsCoord, HisRow, Inv, MshrRec
 
 MAX_CODE_CHANGES = 200  # TOBMain MAX_CHANGES
 
+# Obs-time labels an emitted row may carry: the TOB basis codes plus the 00HR
+# pad (midnight == zero adjustment) this module prepends.  Anything else is a
+# raw metadata value that has not been mapped -- see validate_his_file.
+_VALID_OBS_LABELS = frozenset(ghcn_io.BASIS_CODES) | {"00HR"}
+
 _DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
 # Feet per metre, used to derive .his elevation from station.inv metres.
@@ -207,6 +212,21 @@ def validate_his_file(
             raise ValueError(
                 f"{path}: row {i + 1} unknown obs time " f"{row.obs_time_raw!r}"
             )
+        # Out-of-vocabulary obs times decode to something plausible and WRONG,
+        # so an unknown-code check alone does not catch them.  TOBUtils'
+        # decode_obtime takes chars 3-4 when they are not "HR": a raw HOMR
+        # clock time like "0730" therefore decodes to 30 (the TRID/sunset
+        # code) and "0700" decodes to 24 (midnight, zero adjustment) -- 7am
+        # silently becomes midnight, and nothing downstream complains.  Raw
+        # metadata values must be mapped to a real code label
+        # (metadata_accuracy.resolve_obs) before emission; enforce that here.
+        obs = row.obs_time_raw.strip()
+        if obs and obs not in _VALID_OBS_LABELS:
+            raise ValueError(
+                f"{path}: row {i + 1} obs time {obs!r} is not a TOBMain code "
+                f"label; raw HOMR values must be mapped before emission "
+                f"(decode_obtime({obs!r}) == {row.obs_code})"
+            )
 
     changes = 0
     prev_code = None
@@ -257,6 +277,7 @@ def emit_metadata_his(
     out_dir: Path,
     source: int = 0,
     first_data: Optional[Tuple[int, int]] = None,
+    cover_leading_months: bool = False,
 ) -> Optional[Path]:
     """Metadata-derived .his for stations outside the TOB gate (no TOB solve).
 
@@ -290,6 +311,16 @@ def emit_metadata_his(
     into a first row beginning on the first day of that month, carrying
     the metadata state active at that date.  A relocation marker on a
     clamped-away boundary is dropped: the move predates the data record.
+
+    cover_leading_months extends the first row back to first_data when the
+    documentation begins later than the data.  Required for any station INSIDE
+    the TOB gate: TOBMain applies its pre-history default -- sunset, not
+    midnight (NRMTOB:655) -- to months no history record covers, which would
+    fabricate a TOB adjustment across the undocumented leading span.  For a
+    station whose residual solve is pha-only, that adjustment is precisely what
+    the evidence rules out.  Off by default: outside the gate TOBMain
+    verbatim-copies regardless, so extending there would only move the first
+    row PHA reads, with no TOB consequence to justify it.
     Returns the written path, or None when the station has no dated HOMR
     records.
     """
@@ -349,6 +380,15 @@ def emit_metadata_his(
             else:
                 _b, obs, dms, elev_ft, _d = rows[first_kept - 1]
                 rows = [(clamp, obs, dms, elev_ft, "")] + rows[first_kept:]
+        elif cover_leading_months and rows[0][0] > clamp:
+            # Documentation starts after the data.  Cover the leading span with
+            # the earliest known state, carrying no dist/dir: an absent earlier
+            # record means "no known move", not a move at the start of record.
+            # Row 0 is kept only when it asserts one, so its marker -- and the
+            # changepoint PHA reads from it -- survives at its own date.
+            _b, obs, dms, elev_ft, distdir = rows[0]
+            lead = (clamp, obs, dms, elev_ft, "")
+            rows = [lead] + (rows if distdir.strip() else rows[1:])
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{station_id}.his"
     with open(path, "w", encoding="ascii") as fh:

@@ -235,6 +235,7 @@ class PhrRec:
     begin: Optional[Tuple[int, int, int]]
     end: Optional[Tuple[int, int, int]]
     obs_time: Optional[str]  # raw stripped TIME_OF_OBS, None if sentinel/blank
+    equipment: str = ""  # raw stripped EQUIPMENT (PHR cols 207-216)
 
 
 def _parse_yyyymmdd(s: str) -> Optional[Tuple[int, int, int]]:
@@ -304,11 +305,17 @@ def read_phr(zip_path: Path, wanted_ids: Set[str]) -> Dict[str, List[PhrRec]]:
         obs = line[197:205].strip() or None
         if obs is not None and obs[:4] in PHR_OBS_SENTINELS:
             obs = None
+        # EQUIPMENT: PHR_Table.txt "EQUIPMENT 10 X(10) 207-216" (1-based
+        # inclusive) -> 0-based [206:216].  Carries the observing instrument
+        # (MMTS, NIMBUS, MXMN, ...), which PHA turns into documented
+        # changepoints; see his_metadata.PHR_EQUIPMENT_TO_PHA.
+        equip = line[206:216].strip() if len(line) >= 216 else ""
         rec = PhrRec(
             station_id=sid,
             begin=_parse_yyyymmdd(line[106:114]),
             end=_parse_yyyymmdd(line[115:123]),
             obs_time=obs,
+            equipment=equip,
         )
         out.setdefault(sid, []).append(rec)
     for sid in out:

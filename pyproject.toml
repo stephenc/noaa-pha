@@ -7,6 +7,13 @@ dependencies = [
     "numpy>=1.26",
 ]
 
+[project.optional-dependencies]
+# Only fit_map.py needs a plotting stack; keep it out of the default install so
+# the recovery pipeline stays lightweight.  Use: uv run --extra plot ...
+plot = [
+    "matplotlib>=3.8",
+]
+
 [dependency-groups]
 dev = [
     # Type checking: install the Basilisk language server separately

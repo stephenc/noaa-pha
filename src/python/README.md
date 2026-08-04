@@ -32,11 +32,110 @@ They are **not** part of the original NOAA source-code tarball. Their purpose is
 
 ### History reconstruction (primary feature)
 
+**One command recovers the histories.** Given a prepared workspace it goes from
+QCU + QCF + HOMR metadata (+ optional prior-vintage hints) to `.his` files:
+
+`--hints` takes one directory and is repeatable, so a databank is passed as one
+flag per vintage:
+
+```bash
+uv run python src/python/fetch_homr.py --base data        # metadata, once
+args=(); for d in /path/to/hintstore/*/; do args+=(--hints "$d"); done
+uv run python src/python/reconstruct_his.py --base data "${args[@]}" --jobs 16
+```
+
+Given a hint databank and the HOMR seed metadata, that one invocation is the
+whole recovery. Four phases run in-process, so there is a single entry point and
+no orchestration for a caller to get wrong:
+
+1. **solve** — exact QCU/QCF residual decomposition into observation-time
+   regimes, consuming donor hints from prior vintages (the slow part). Emission
+   is restricted here to stations NOAA is responsible for
+   (`--no-us-responsible`).
+2. **PHR fill** — documents months no vintage constrains, under strict
+   precedence *current-vintage solve > donor hints > PHR*
+   (`--no-phr-fill`, `--phr-fill-regions pre,interior,post`).
+3. **metadata rows** — rebuilds the non-TOB `.his` fields from HOMR
+   (`--no-metadata-rows` for a strictly TOB-only history).
+4. **COOP histories** — metadata-derived rows for CONUS COOP stations with no
+   TOB solve (`--no-coop-history`). Runs last by necessity: it writes
+   HOMR-derived files, which phases 2 and 3 must not then rewrite.
+
+"Whole recovery" describes the pipeline, not the answer. The residual evidence
+reaches exactly as far as QCF does — a QCU month with no QCF value has no
+residual to decompose, so this vintage cannot resolve its observation time.
+Vintages differ in which segments PHA retains and removes, so a month
+unreachable here may carry a QCF value in another, and donor hints import what
+those vintages could prove. Everything still unproven is documented from PHR and
+HOMR. More vintages widen the proven fraction; none of them close it.
+
+Phases 3 and 4 are idempotent and read only what the solve wrote, so they can be
+re-run alone against a finished base to retune policy without repeating the
+solve.
+
 - `reconstruct_his.py` — driver CLI (default: full inventory, emission on).
   - Classifies stations, solves CONUS residuals, emits `.his` into
     `<base>/intermediate/history`, and provisions `<base>/intermediate/`
     (`station.inv` filtered to QCF stations + empty `tob/tavg` out-dir).
   - Example: `uv run python src/python/reconstruct_his.py --base data`
+
+- `fetch_homr.py` — downloads MSHR + PHR and their official layout specs into a
+  base, writing `homr_provenance.json` (URL, UTC timestamp, size, SHA-256).
+  HOMR publishes undated "latest" files, so recording which copy was used is
+  what makes a reconstruction reproducible. `--check` re-verifies the hashes.
+
+### Observation time: evidence first, metadata second
+
+- `phr_fill.py` — fills months the residual solve leaves unconstrained with
+  PHR-documented observation times. Precedence is enforced as a per-month
+  authority mask: months inside a constrained run of this vintage's evidence,
+  or covered by an adopted donor hint, are never touched. That mask is also
+  what preserves the bit-exact QCF identity — a re-coded month could otherwise
+  break `qcf == pha_qcf(t_out, S)`. Runs touching a QCF-present month, or an
+  original (solved) regime begin, are refused whole and counted.
+
+### Everything except observation time: `his_metadata.py`
+
+`his_emit.emit_station_his` deliberately writes constant coordinates,
+elevation, blank dist/dir and blank instruments — the "verbatim-field
+invariant", which guarantees a TOB-only pipeline injects no phantom PHA
+changepoint. The consequence is that PHA run with `pha.use-history-files = 1`
+over such a history finds **no documented changepoints at all**:
+`ReadInputFiles.f95` sets `history_code` from instrument height, instruments,
+dist/dir or a position change — never from an observation-time change.
+
+`his_metadata.py` rebuilds those fields from what NOAA publishes:
+
+| `.his` field       | source                         | spec |
+|--------------------|--------------------------------|------|
+| observation time   | solve > hints > PHR            | (ours) |
+| latitude/longitude | MSHR `LAT_DEC` / `LON_DEC`     | MSHR_Enhanced_Table.txt 1300-1319 / 1321-1340 |
+| elevation          | MSHR `ELEV_GROUND`             | MSHR_Enhanced_Table.txt 990-1029 |
+| dist/dir           | MSHR `RELOCATION`              | MSHR_Enhanced_Table.txt 1353-1414 |
+| instruments        | PHR `EQUIPMENT`                | PHR_Table.txt 207-216 |
+| instrument height  | **not published by HOMR** → blank | — |
+
+Two rules keep it from inventing changepoints:
+
+- **A row is written only when PHA could see the difference.** Comparison uses
+  PHA's own semantics against the *last emitted* row: exact for elevation and
+  instruments, but coordinates only beyond `latlon_epsilon` (45 arcsec), since a
+  sub-threshold re-survey nudge can never produce a changepoint. Comparing
+  against the last emitted row (not the previous candidate) still catches a slow
+  drift once it accumulates past the threshold.
+- **Undocumented equipment is not an instrument change.** PHR is full of
+  `UNKNOWN`/`ATEMP`/blank values; emitting "no instrument" there would flip
+  `instr(21)` against the previous row and make PHA read a `MOVE` out of a gap
+  in documentation. The last known instrument is carried forward instead.
+
+`validate_his_file` will warn about elevation/instrument changes and non-blank
+dist/dir for these files. That is expected: those warnings exist to police the
+verbatim-field invariant, which this mode relaxes on purpose.
+
+The TOB series is unaffected — TOBMain reads the observation time and (with
+`tob.use-his-lat-lon=false`) takes coordinates from `station.inv`, ignoring
+elevation, instruments and dist/dir. Verify rather than assume: rebuild the TOB
+into a scratch directory from a `--no-metadata-rows` history and diff the two.
 
 - `residual_solver.py` — exact decomposition of QCF−QCU residuals into TOB
   regime timelines + PHA segment sums (interval arithmetic; no tolerances).
@@ -139,6 +238,39 @@ All derived state (solutions, basis cache) lives under `<base>/intermediate`
 and transient scratch under `<base>/scratch`, so a run never writes outside its
 base dir. This step is **not** part of `quickstart_tob.sh`; run it when you want
 an end-to-end gate.
+
+### Scoring the PHA output
+
+`verify_his.py` gates the *reconstruction*; these two measure how closely a full
+TOB + PHA run reproduces NOAA's published QCF.
+
+- `pha_fit_score.py` — composite fit over the whole corpus, weighting
+  changepoint-date alignment 0.4, adjustment level 0.3 and data removal 0.3.
+  `--per-station <tsv>` also writes the per-station breakdown, which is what
+  makes a corpus number diagnosable rather than merely reportable.
+
+  ```bash
+  uv run python src/python/pha_fit_score.py \
+      --tob  data/intermediate/tob/tavg \
+      --qcf  data/output/qcf/tavg \
+      --adj  data/output/adj/tavg \
+      --per-station data/per_station.tsv
+  ```
+
+  Score against the TOB the run itself produced. Reusing a TOB from an earlier
+  run measures two configurations at once: it is both PHA's input and the
+  baseline the removal and level terms are computed against.
+
+- `pha_fit_map.py` — plots that per-station TSV on a Mercator projection, so a
+  clustered residual is visible as a place rather than a number. Needs the
+  optional plotting extra:
+
+  ```bash
+  uv run --extra plot python src/python/pha_fit_map.py \
+      --per-station data/per_station.tsv \
+      --inventory data/intermediate/station.inv \
+      --out fit_world.png --region world       # or: conus, europe
+  ```
 
 ## Prerequisites
 

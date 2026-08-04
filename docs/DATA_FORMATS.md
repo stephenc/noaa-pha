@@ -308,28 +308,75 @@ pha.test.use-arg = use-{arg:d}
     *   `pha.do-run-main`, `pha.do-run-neighbors`: Control execution flow in test programs.
     *   `pha.path.*-expected*`: Paths to expected output files for comparison tests.
 
-**Example (`ghcnm-pha.unit-test.properties` snippet):**
+**Recovered GHCN-M v4 configuration.** These are the values the operational
+pipeline runs at, and the ones `src/python/qcu_to_inputs.py` writes into a
+generated `tob.properties`. Prefer generating the file over hand-writing one.
+
 ```properties
-# Properties file specifically for running PHATestUnits
-
-# === Logger Configuration ===
-pha.logger.filename = build/pha-unit-test.log
-pha.logger.level = DEBUG
-
-# === Core PHA Run Parameters ===
-pha.begin-year = 1851
-pha.element = tmax
-pha.input-data-type = raw
-pha.version = uni
-
-# === File Path Configuration ===
-pha.path.station-metadata = data/ghcnm.inv
-pha.path.neighbors.distance = output/neighbors-distance.unit-test.txt
-
 # === Neighbor Selection Parameters ===
-pha.neighbors.distance-neighbor-limit = 40
+pha.neighbors.distance-neighbor-limit = 100
+pha.neighbors.final-neighbor-limit = 40
 pha.neighbors.method = first-diffs
+pha.neighbors.min-station-coverage = 14
+pha.neighbors.min-coefficient = 0.1
+
+# === Changepoint/Adjustment Parameters ===
+pha.snht-threshold = 5
+pha.bic-penalty = bic
+pha.amploc-percent = 92
+pha.confirm = 2
+pha.adjust.min-length = 18
+pha.adjust.min-neighbors = 2
+pha.adjust.remove-outliers = true
+pha.adjust.window = 0
+pha.adjust.filter-method = conf
+pha.adjust.est-method = med
+pha.remove-insignificant = true
+pha.use-history-files = 1
 ```
+
+The neighbour block is the load-bearing part: those five keys decide which
+stations PHA ever compares, so changing them moves the result far more than any
+post-neighbour knob, which only reweights an already-fixed set. The
+`100`/`40` pair is corroborated externally by O'Neill et al. (2022), which
+describes the operational PHA as using "40 out of 100 nearest neighbors".
+
+Every post-neighbour parameter above has been enumerated in both directions
+across several input landscapes and is peaked at the value shown
+(`adjust.window` is limiting rather than peaked: every finite window loses to
+unlimited), and pairwise interactions are saturating rather than compensating.
+
+### Falsification, not just optimisation
+
+Each value carries a falsification. A **sentinel** is a station that reproduces
+the published QCF exactly *and* is fed only by neighbours that also do; if a
+parameter were wrong, such a station could not stay exact. An alternative is
+falsified when it changes a sentinel's changepoint set. Every parameter in the
+table is established this way:
+
+| parameter group | how it is established |
+|---|---|
+| the 11 post-neighbour keys | enumerated both directions across landscapes, pairwise interactions measured, sentinel-falsified |
+| `distance-neighbor-limit` / `final-neighbor-limit` | sharp-peak sweep, plus O'Neill et al. (2022) |
+| `method` | enumerated |
+| `min-coefficient` | sentinel-falsified in both directions |
+| `min-station-coverage` | sentinel-falsified in both directions |
+
+The control is what makes this stand up: rebuilding the neighbour network at the
+shipped values disturbs no sentinel, so the instrument demonstrably does not
+fire on nothing.
+
+`min-station-coverage` deserves particular care. Perturbing it barely shows in
+aggregate output — which once made it look like the least-supported value in the
+set — yet it disturbs several times more sentinels than any other parameter
+tested. A change that looks harmless in the aggregate is not thereby safe, and
+this is the parameter most likely to be "tidied" by someone reading only the
+corpus-level effect. Do not.
+
+The files under `build/` are unit- and output-test fixtures. They use different
+values (`40`/`20`/`7`, `pha.element = tmax`, a 1851 begin year) because they
+exist to exercise the *format* and the test harness against stored expected
+output — not because those are defaults worth inheriting.
 
 ---
 

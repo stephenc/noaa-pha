@@ -53,6 +53,33 @@ SPECIALS = {
 }
 
 
+def resolve_obs(raw: Optional[str]) -> Optional[str]:
+    """A SINGLE obs-time code for a raw PHR value, for emission.
+
+    ``normalize_obs`` returns a *set* because it is a scoring function: a
+    recovered code matching either bracket of an off-the-hour time counts as a
+    match.  Emission must commit to one, and it takes the hour at or before the
+    reading -- NOAA truncates.  Wherever the residual solve independently proves
+    a code across an off-the-hour period, that is the bracket it agrees with.
+
+    The choice cannot be made by sorting the set: ``24HR`` is midnight (hour 0),
+    so ``{01HR, 24HR}`` (from 00:43) sorts to the wrong order while
+    ``{23HR, 24HR}`` (from 23:30) sorts to the right one.  It has to be derived
+    from the raw value, mirroring ``normalize_obs``'s own computation:
+
+        lo = 24 if hh == 0 else hh      # the hour at or before the reading
+
+    Returns None when PHR documents nothing usable.
+    """
+    codes, kind = normalize_obs(raw)
+    if codes is None:
+        return None
+    if len(codes) == 1:
+        return next(iter(codes))
+    hh = int(raw.strip().upper()[:2])
+    return "%02dHR" % (24 if hh == 0 else hh)
+
+
 def normalize_obs(raw: Optional[str]) -> Tuple[Optional[FrozenSet[str]], str]:
     """Normalize a raw PHR TIME_OF_OBS to our code set.
 

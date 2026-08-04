@@ -12,11 +12,15 @@ extend a station's timeline outside its own QCF hull -- never inside it.
 
 It subsumes ``merge_history.py``: the same hull / adoptability / effective-
 month / boundary-crossing / refusal semantics, moved from ``.his``-row space
-to regime+evidence space.  Hard invariants (see the proposal, v1 scope):
+to regime+evidence space.  Hard invariants:
 
   * No tolerances anywhere -- integer cents / interval logic only.
-  * The solve is **never** hint-influenced in v1; hints act only at
-    consolidation, strictly outside the current QCF hull.
+  * Consolidation acts strictly outside the current QCF hull, so an adopted
+    regime can never displace a month this vintage's residuals constrain.
+    (Hints additionally steer the solve inside the hull -- enumeration
+    preference and hinted-boundary retry -- which changes which exact
+    decomposition is found, never whether it reproduces QCF.  ``reconstruct_his
+    --no-vintage-hints`` turns that off, leaving consolidation alone.)
   * With no ``--hints`` supplied, emitted ``.his`` bytes are unchanged.
 
 Schema: ``tob-hints/1`` (see ``StationHints`` / the proposal §3.2).  Files
@@ -43,8 +47,8 @@ Ymd = Tuple[int, int, int]
 HINT_FORMAT = "tob-hints/1"
 
 # Evidence classes (schema enum).  ``metadata-only`` is reserved (non-CONUS
-# metadata rows); it is neither produced nor consumed in v1, but the loader
-# accepts it so a future producer does not trip validation.
+# metadata rows): nothing produces or consumes it, but the loader accepts it so
+# a future producer does not trip validation.
 EVIDENCE_CLASSES = frozenset(
     {
         "residual-proven",
