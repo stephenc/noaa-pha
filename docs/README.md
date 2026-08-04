@@ -1,7 +1,10 @@
-# Documentation Index
+# Documentation index
 
-- `docs/CHANGES.md`: Reconstruction changes versus NOAA's `ghcnm.src.v4.03172025.tar`.
-- `docs/WORKFLOWS.md`: End-to-end runbooks (data prep, PHA/TOB runs, output comparison), tests, and Docker usage.
-- `docs/PROGRAMS.md`: Program-level reference and inferred entrypoint behavior.
-- `docs/DATA_FORMATS.md`: File-format reference (`.dat`, `.inv`, neighbors, properties, `.his`, edit files, logs).
-- `src/go/README.md`: Go viewer webapp overview and usage.
+- `docs/WORKFLOWS.md`: how to run the pipeline, the tests and Docker.
+- `docs/CHANGES.md`: what this reconstruction changes in NOAA's
+  `ghcnm.src.v4.03172025.tar`.
+- `docs/PROGRAMS.md`: what each program does, and how it behaves.
+- `docs/DATA_FORMATS.md`: the file formats, and the recovered PHA
+  configuration with the evidence for it.
+- `src/python/README.md`: the Python helpers, and station-history recovery.
+- `src/go/README.md`: the viewer webapp.

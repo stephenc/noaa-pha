@@ -1,17 +1,16 @@
-# Python Helpers (Project Additions)
+# Python helpers
 
-These Python scripts are **project-specific helpers** added in this repository.
-They are **not** part of the original NOAA source-code tarball. Their purpose is to:
+These scripts are additions to this repository. NOAA's source tarball does not
+contain them. They do this work:
 
-- Prepare input data for the PHA pipeline from the published **QCU** dataset.
-- Prepare comparable output data from the published **QCF** dataset.
-- Reconstruct unpublished station history (`.his`) files bit-exactly from
-  QCU/QCF residuals (CONUS) and HOMR metadata (non-CONUS).
-- Optionally verify that a TOBMain run over those histories matches the
-  solver solutions.
-- Compare per-station outputs between two directories.
+- Build the PHA input workspace from the published QCU dataset.
+- Build comparable output files from the published QCF dataset.
+- Recover the unpublished station history (`.his`) files. The CONUS histories
+  come from the QCU/QCF residuals, and the others from HOMR metadata.
+- Verify that a TOBMain run agrees with the solver solutions.
+- Compare and score the output.
 
-## What Each Script Does
+## What each script does
 
 ### Workspace prep
 
@@ -30,48 +29,63 @@ They are **not** part of the original NOAA source-code tarball. Their purpose is
   - Matches by station ID (first filename segment).
   - Outputs summary stats in Celsius and 30-year bins.
 
-### History reconstruction (primary feature)
+### Station-history recovery (primary feature)
 
-**One command recovers the histories.** Given a prepared workspace it goes from
-QCU + QCF + HOMR metadata (+ optional prior-vintage hints) to `.his` files:
-
-`--hints` takes one directory and is repeatable, so a databank is passed as one
-flag per vintage:
+One command does all of the recovery. It reads QCU, QCF and the HOMR metadata,
+and writes the `.his` files:
 
 ```bash
 uv run python src/python/fetch_homr.py --base data        # metadata, once
+uv run python src/python/reconstruct_his.py --base data
+```
+
+`--hints` reads a hint databank. The option takes one directory, and you can
+give it more than once:
+
+```bash
 args=(); for d in /path/to/hintstore/*/; do args+=(--hints "$d"); done
 uv run python src/python/reconstruct_his.py --base data "${args[@]}" --jobs 16
 ```
 
-Given a hint databank and the HOMR seed metadata, that one invocation is the
-whole recovery. Four phases run in-process, so there is a single entry point and
-no orchestration for a caller to get wrong:
+Four phases run in one process, thus there is one entry point and the caller
+cannot get the sequence wrong:
 
-1. **solve** — exact QCU/QCF residual decomposition into observation-time
-   regimes, consuming donor hints from prior vintages (the slow part). Emission
-   is restricted here to stations NOAA is responsible for
-   (`--no-us-responsible`).
-2. **PHR fill** — documents months no vintage constrains, under strict
-   precedence *current-vintage solve > donor hints > PHR*
+1. **solve** — decompose the QCU/QCF residuals into observation-time regimes,
+   and use the donor hints. This phase takes the most time. It writes a history
+   only for the stations that NOAA is responsible for (`--no-us-responsible`).
+2. **PHR fill** — document the months that no vintage constrains. The order of
+   authority is: this vintage, then donor hints, then PHR
    (`--no-phr-fill`, `--phr-fill-regions pre,interior,post`).
-3. **metadata rows** — rebuilds the non-TOB `.his` fields from HOMR
-   (`--no-metadata-rows` for a strictly TOB-only history).
-4. **COOP histories** — metadata-derived rows for CONUS COOP stations with no
-   TOB solve (`--no-coop-history`). Runs last by necessity: it writes
-   HOMR-derived files, which phases 2 and 3 must not then rewrite.
+3. **metadata rows** — write the other `.his` fields from HOMR
+   (`--no-metadata-rows` gives a history with TOB fields only).
+4. **COOP histories** — write metadata histories for the CONUS COOP stations
+   that have no TOB solve (`--no-coop-history`). This phase must be last,
+   because phase 2 and phase 3 must not change the files that it writes.
 
-"Whole recovery" describes the pipeline, not the answer. The residual evidence
-reaches exactly as far as QCF does — a QCU month with no QCF value has no
-residual to decompose, so this vintage cannot resolve its observation time.
-Vintages differ in which segments PHA retains and removes, so a month
-unreachable here may carry a QCF value in another, and donor hints import what
-those vintages could prove. Everything still unproven is documented from PHR and
-HOMR. More vintages widen the proven fraction; none of them close it.
+Phase 2 and phase 3 read only what the solve wrote. You can run them again on a
+finished base, and they give the same result. Thus you can change their policy
+without a new solve.
 
-Phases 3 and 4 are idempotent and read only what the solve wrote, so they can be
-re-run alone against a finished base to retune policy without repeating the
-solve.
+#### How to build a hint databank
+
+Use the same command. Run it with no `--hints` option on each pair of QCU and
+QCF files. Each run writes its evidence to `<base>/intermediate/hints`. Collect
+those directories to make a databank. A vintage does not need a databank to
+supply one, and a run refuses the hints from its own base.
+
+#### What the recovery can and cannot prove
+
+The residual evidence reaches as far as QCF does, and no further. A QCU month
+with no QCF value has no residual to decompose. Thus this vintage cannot
+establish the observation time for that month.
+
+Vintages keep and remove different segments. Thus a month that one vintage
+cannot reach can have a QCF value in another one. A databank imports what those
+vintages proved. More vintages increase the fraction that is proven, but no
+databank makes it complete.
+
+PHR and HOMR document what no vintage proves. That is documentation, not
+evidence. Do not describe the result as final.
 
 - `reconstruct_his.py` — driver CLI (default: full inventory, emission on).
   - Classifies stations, solves CONUS residuals, emits `.his` into
@@ -86,23 +100,26 @@ solve.
 
 ### Observation time: evidence first, metadata second
 
-- `phr_fill.py` — fills months the residual solve leaves unconstrained with
-  PHR-documented observation times. Precedence is enforced as a per-month
-  authority mask: months inside a constrained run of this vintage's evidence,
-  or covered by an adopted donor hint, are never touched. That mask is also
-  what preserves the bit-exact QCF identity — a re-coded month could otherwise
-  break `qcf == pha_qcf(t_out, S)`. Runs touching a QCF-present month, or an
-  original (solved) regime begin, are refused whole and counted.
+- `phr_fill.py` — writes PHR observation times into the months that the
+  residual solve does not constrain. A mask of authority for each month
+  controls this. The fill never changes a month inside a constrained run of
+  this vintage, or a month that an adopted donor hint covers. The mask also
+  keeps the bit-exact QCF identity, because a month with a new code can break
+  `qcf == pha_qcf(t_out, S)`. The fill refuses a complete run if the run
+  touches a month with a QCF value, or the start of a solved regime. It counts
+  each refusal.
 
 ### Everything except observation time: `his_metadata.py`
 
-`his_emit.emit_station_his` deliberately writes constant coordinates,
-elevation, blank dist/dir and blank instruments — the "verbatim-field
-invariant", which guarantees a TOB-only pipeline injects no phantom PHA
-changepoint. The consequence is that PHA run with `pha.use-history-files = 1`
-over such a history finds **no documented changepoints at all**:
-`ReadInputFiles.f95` sets `history_code` from instrument height, instruments,
-dist/dir or a position change — never from an observation-time change.
+`his_emit.emit_station_his` writes constant coordinates and elevation, and
+leaves dist/dir and the instruments blank. This is the verbatim-field
+invariant. It makes sure that a TOB-only pipeline adds no false PHA
+changepoint.
+
+There is a consequence. PHA with `pha.use-history-files = 1` finds **no
+documented changepoints** in such a history. `ReadInputFiles.f95` sets
+`history_code` from the instrument height, the instruments, dist/dir or a
+change of position. It never sets it from a change of observation time.
 
 `his_metadata.py` rebuilds those fields from what NOAA publishes:
 
@@ -132,10 +149,11 @@ Two rules keep it from inventing changepoints:
 dist/dir for these files. That is expected: those warnings exist to police the
 verbatim-field invariant, which this mode relaxes on purpose.
 
-The TOB series is unaffected — TOBMain reads the observation time and (with
-`tob.use-his-lat-lon=false`) takes coordinates from `station.inv`, ignoring
-elevation, instruments and dist/dir. Verify rather than assume: rebuild the TOB
-into a scratch directory from a `--no-metadata-rows` history and diff the two.
+This does not change the TOB series. TOBMain reads the observation time. With
+`tob.use-his-lat-lon=false` it takes the coordinates from `station.inv`. It
+does not read the elevation, the instruments or dist/dir. Do not assume this.
+Build the TOB again from a `--no-metadata-rows` history into a scratch
+directory, and compare the two.
 
 - `residual_solver.py` — exact decomposition of QCF−QCU residuals into TOB
   regime timelines + PHA segment sums (interval arithmetic; no tolerances).
@@ -159,15 +177,16 @@ into a scratch directory from a `--no-metadata-rows` history and diff the two.
 
 ### Cross-vintage TOB hints (evidence capture + consolidation)
 
-Every reconstruction run writes a per-station **hints** file to
-`<base>/intermediate/hints/<sid>.hints.json` recording *what the residual
-solve actually established* — constraint runs, per-regime coverage,
-offset-ambiguity sets, and boundary evidence (schema `tob-hints/1`).  These
-are a pure function of the residual solve (`--no-hints-out` suppresses them).
+Each run writes a **hints** file for each station to
+`<base>/intermediate/hints/<sid>.hints.json`. The file records what the
+residual solve established: constraint runs, the coverage of each regime,
+offset-ambiguity sets and boundary evidence (schema `tob-hints/1`). The
+contents are a function of the residual solve alone. `--no-hints-out` stops
+these files.
 
-When another QCF vintage covers years this base does not, consolidate its
-hints into this base's timeline — extending it **outside this vintage's QCF
-hull only** (the solve is never hint-influenced in v1):
+When another QCF vintage covers years that this base does not, consolidate its
+hints into this base's timeline. Consolidation extends the timeline **outside
+this vintage's QCF hull only**:
 
 ```bash
 uv run python src/python/reconstruct_his.py --base data \
@@ -207,21 +226,20 @@ uv run python src/python/tob_hints.py derive --base data   # (re)write hints
 
 #### Phase 2: vintage hints influencing the solve (on by default; `--no-vintage-hints` to disable)
 
-By default, `--hints` both extends the timeline *outside* the QCF hull
-(consolidation) **and** lets donor evidence tip the **interior** solve — an
-enumeration preference toward documented codes at equal cost, plus a
-hinted-boundary retry that only accepts a *strictly* better (fewer-deviant)
-reading. Pass `--no-vintage-hints` to restrict `--hints` to consolidation only
-(the interior solve is then never hint-influenced).
+By default, `--hints` does two things. It extends the timeline outside the QCF
+hull, which is consolidation. It also lets donor evidence influence the solve
+inside the hull. Inside the hull the influence has two parts: a preference for
+documented codes when the cost is equal, and a retry at a hinted boundary. The
+retry accepts the new reading only if it has fewer deviants.
+`--no-vintage-hints` limits `--hints` to consolidation.
 
-To keep the interior influence honest, the station is solved twice (with and
-without vintage hints) and compared by rank: a strict improvement keeps its
-natural class, but an equal-rank reading the hint merely *tipped* is a policy
-adoption — those regimes export as class `residual-proven-hinted` and are
-**never** re-adoptable downstream, so a donor's tie-break can never launder into
-this vintage's independent proof. The emitted `.his` is always a real,
-bit-exactly verifiable reading. Run the cross-vintage experiment both ways
-(`--no-vintage-hints` vs default) to measure it.
+The driver solves each station twice, with and without the vintage hints, and
+compares the two readings by rank. A better reading keeps its natural class. If
+the ranks are equal, the hint only tipped the choice, and that is a policy
+adoption. Such regimes get the class `residual-proven-hinted`. No later run can
+adopt them again. Thus a tie-break from a donor cannot become independent proof
+in this vintage. The emitted `.his` is always a real reading that you can
+verify bit-exactly.
 
 ### Optional verification gate
 

@@ -3,7 +3,7 @@
 ## GHCNM Inventory Format (`.inv`, `meta.*`)
 
 **Description:**
-This format stores station metadata, including station ID, geographical coordinates (latitude, longitude, elevation), station name, and potentially other information like composite station IDs or period of record indicators depending on the specific variant or generating program. It serves as the master list of stations for various processing steps.
+This format holds the metadata for each station: the station ID, the latitude, the longitude, the elevation and the name. Some variants hold more fields, such as composite station IDs or the period of record. The fields depend on the program that writes the file. This file is the master list of stations for the other steps.
 
 **Syntax (GHCNMv2/v3 Style - used by `test-station-meta-v3.txt`):**
 
@@ -125,7 +125,7 @@ USH00018323 1919 -9999 X  -9999 X  -9999 X  -9999 X  -9999    -9999 X  -9999 Q  
 ## GHCNMv2 Monthly Data Format
 
 **Description:**
-This format, used by older versions of GHCNM, stores monthly data similarly to the 3-flag format but uses a different fixed-width layout and includes a 4-character element identifier within each record. Values are typically 5 digits. Several AWK scripts (`compare.mm_avg.awk`, `convert_mv2_d2m.awk`, `summarize_Mv2_flags.awk`) are designed to read or process this format.
+Older versions of GHCNM use this format. It holds the same monthly data as the 3-flag format, but the fixed-width layout is different. Each record also holds a 4-character element identifier. The values usually have 5 digits. These AWK scripts read this format: `compare.mm_avg.awk`, `convert_mv2_d2m.awk` and `summarize_Mv2_flags.awk`.
 
 **Syntax:**
 
@@ -335,48 +335,45 @@ pha.remove-insignificant = true
 pha.use-history-files = 1
 ```
 
-The neighbour block is the load-bearing part: those five keys decide which
-stations PHA ever compares, so changing them moves the result far more than any
-post-neighbour knob, which only reweights an already-fixed set. The
-`100`/`40` pair is corroborated externally by O'Neill et al. (2022), which
-describes the operational PHA as using "40 out of 100 nearest neighbors".
+The five neighbour keys are the important ones. They decide which stations PHA
+compares. The other keys only change the weight of a set that is already fixed.
+Thus a change to a neighbour key moves the result much more. O'Neill et al.
+(2022) supports the `100` and `40` pair. That paper says that the operational
+PHA uses "40 out of 100 nearest neighbors".
 
-Every post-neighbour parameter above has been enumerated in both directions
-across several input landscapes and is peaked at the value shown
-(`adjust.window` is limiting rather than peaked: every finite window loses to
-unlimited), and pairwise interactions are saturating rather than compensating.
+### How these values are established
 
-### Falsification, not just optimisation
+Each value has a falsification, not only an optimisation. A **sentinel** is a
+station that reproduces the published QCF exactly. No station within 5 hops of
+it in the neighbour network fails to do the same. Thus nothing that PHA feeds
+into that station, directly or indirectly, is itself in error. A wrong
+parameter cannot keep such a station exact.
 
-Each value carries a falsification. A **sentinel** is a station that reproduces
-the published QCF exactly *and* is fed only by neighbours that also do; if a
-parameter were wrong, such a station could not stay exact. An alternative is
-falsified when it changes a sentinel's changepoint set. Every parameter in the
-table is established this way:
+At the values above there are more than 2,000 sentinels. One sentinel that
+changes is not a result, because the network can move a single station for
+other reasons. Many sentinels that change is the signal. An alternative value
+is false when it changes the changepoint sets of many sentinels.
 
-| parameter group | how it is established |
+| parameter | how it is established |
 |---|---|
-| the 11 post-neighbour keys | enumerated both directions across landscapes, pairwise interactions measured, sentinel-falsified |
-| `distance-neighbor-limit` / `final-neighbor-limit` | sharp-peak sweep, plus O'Neill et al. (2022) |
-| `method` | enumerated |
-| `min-coefficient` | sentinel-falsified in both directions |
-| `min-station-coverage` | sentinel-falsified in both directions |
+| the 11 keys after neighbour selection | tested in both directions on more than one input set, with the interaction of each pair measured, then falsified against sentinels |
+| `distance-neighbor-limit`, `final-neighbor-limit` | sweep with a sharp peak, and O'Neill et al. (2022) |
+| `method` | tested against each alternative |
+| `min-coefficient` | falsified against sentinels in both directions |
+| `min-station-coverage` | falsified against sentinels in both directions |
 
-The control is what makes this stand up: rebuilding the neighbour network at the
-shipped values disturbs no sentinel, so the instrument demonstrably does not
-fire on nothing.
+The control makes this valid. A new neighbour network at the values above moves
+no sentinel. Thus the test does not report an error where there is none.
 
-`min-station-coverage` deserves particular care. Perturbing it barely shows in
-aggregate output — which once made it look like the least-supported value in the
-set — yet it disturbs several times more sentinels than any other parameter
-tested. A change that looks harmless in the aggregate is not thereby safe, and
-this is the parameter most likely to be "tidied" by someone reading only the
-corpus-level effect. Do not.
+Give `min-station-coverage` more care than the others. A change to it makes
+little difference to the output of the full set of stations. But it moves more
+sentinels than any other parameter. A change that looks safe in the full set is
+not necessarily safe. Do not change this value.
 
-The files under `build/` are unit- and output-test fixtures. They use different
-values (`40`/`20`/`7`, `pha.element = tmax`, a 1851 begin year) because they
-exist to exercise the *format* and the test harness against stored expected
-output — not because those are defaults worth inheriting.
+The files in `build/` are fixtures for the unit tests and the output tests.
+They use other values (`40`, `20`, `7`, `pha.element = tmax`, and 1851 as the
+first year). These values exercise the format and the test tools against stored
+results. Do not use them as defaults.
 
 ---
 
@@ -425,7 +422,7 @@ These files contain documented changes for a specific station, such as moves, in
 ## Data Edit File Format (`edit.dat`)
 
 **Description:**
-This file provides instructions for editing specific data points in the GHCNM dataset. Each line specifies a station, element, date, the value to potentially change, and the new flags. A code ('D' or 'C') indicates whether the change should only occur if the original data matches the value in the edit file ('D' - Delay until new value?) or if the change should be applied unconditionally ('C' - Correct).
+This file tells the program how to edit data points in the GHCNM dataset. Each line gives a station, an element, a date, the value to change and the new flags. A code controls the change. With 'C' (correct), the program always makes the change. With 'D', it makes the change only if the data agrees with the value in the edit file.
 
 **Syntax (Inferred from `ghcnm_edit.f95` READ statement):**
 
@@ -487,7 +484,7 @@ This file provides instructions for updating station metadata (name, latitude, l
 ## CLIMAT Message File Format
 
 **Description:**
-This format contains raw CLIMAT messages, likely interspersed with other text or headers. The `climat_decoder` program specifically looks for lines containing indicators like `CLIMAT`, `111`, `222`, `333`, `444`, and group codes like ` 3`, ` 4`, ` 6` within section `111` to extract WMO ID, date, and specific meteorological values (TAVG, TMAX, TMIN, PRCP). The exact structure is complex and follows WMO standards for CLIMAT reports.
+This format holds raw CLIMAT messages. Other text and headers can occur between them. The `climat_decoder` program finds the lines with the indicators `CLIMAT`, `111`, `222`, `333` and `444`. In section `111` it also finds the group codes ` 3`, ` 4` and ` 6`. From these lines it reads the WMO ID, the date, TAVG, TMAX, TMIN and PRCP. The full structure obeys the WMO standard for CLIMAT reports.
 
 **Syntax:**
 *(Complex and variable, based on WMO CLIMAT code form. Parsing relies on finding specific keywords and group indicators within lines).*

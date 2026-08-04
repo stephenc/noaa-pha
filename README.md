@@ -3,28 +3,29 @@
 On March 20, 2025, NOAA published the GHCNM v4 source tarball:
 `ftp://ftp.ncei.noaa.gov/pub/data/ghcn/v4/source_code/ghcnm.src.v4.03172025.tar`
 
-This repository is a reconstructed, buildable, and testable version of that release, with additional tooling and documentation.
+This repository is a buildable and testable version of that release. It adds
+tooling and documentation.
 
-## What Was Added
+## What this adds
 
-The following were added in this reconstruction and were not part of NOAA's original tarball:
+NOAA's tarball does not contain these:
 
-- Build orchestration (`Makefile`, `generate_deps.py`)
-- Additional test fixtures/configuration required to run reconstructed tests
-- TOB pipeline reconstruction (`TOBMain`, `TOBUtils`, `TOBTestUnits`)
-- Go viewer webapp (`src/go`, built as `bin/PHAview`)
-- Python helper scripts (`src/python`) for data prep and comparison workflows
-- Expanded project documentation
+- Build control (`Makefile`, `generate_deps.py`)
+- The test fixtures and configuration that the tests need
+- The TOB pipeline (`TOBMain`, `TOBUtils`, `TOBTestUnits`)
+- Station-history recovery and other Python helpers (`src/python`)
+- The Go viewer webapp (`src/go`, built as `bin/PHAview`)
+- This documentation
 
-For the detailed change list, see `docs/CHANGES.md`.
+`docs/CHANGES.md` lists the changes to NOAA's own sources.
 
 ## Prerequisites
 
 - `make`
-- `gfortran` (or compatible Fortran compiler)
-- `python3`
+- `gfortran`, or a compatible Fortran compiler
+- `python3` and `uv`
 - `gawk`
-- `go` 1.22+ (for `bin/PHAview`)
+- `go` 1.22 or later, for `bin/PHAview`
 
 ## Build
 
@@ -32,130 +33,56 @@ For the detailed change list, see `docs/CHANGES.md`.
 make
 ```
 
-This builds Fortran programs, AWK wrappers, and the Go viewer binary (`bin/PHAview`).
+This builds the Fortran programs, the AWK wrappers and `bin/PHAview`. Other
+targets: `all`, `test`, `unit-test`, `output-test`, `phaview`, `clean`, `help`.
 
-Useful targets:
+Build `bin/TOBMain` with `TRIG_BACKEND=llvm-exact` before you recover station
+histories:
 
-- `make all`
-- `make test`
-- `make unit-test`
-- `make output-test`
-- `make phaview`
-- `make clean`
-- `make help`
+```bash
+make TRIG_BACKEND=llvm-exact bin/TOBMain
+```
 
-## Quick Start (TOB + PHA)
+This backend makes the float32 trigonometry give the same result on each
+compiler. The recovery needs that.
 
-Recommended: run the scripted quickstart:
+## Quick start
 
 ```bash
 ./quickstart_tob.sh
 ```
 
-The script conditionally downloads upstream inputs (only when the remote file is newer),
-reconstructs inputs/history, runs TOB + PHA, then launches the viewer at
-`http://localhost:8080/` (use `--no-viewer` to skip).
+The script downloads the published inputs, but only when the remote file is
+newer. It then builds the workspace, recovers the histories, runs TOB and PHA,
+and starts the viewer at `http://localhost:8080/`. Use `--no-viewer` to stop
+the viewer.
 
-To force FTP endpoints for the GHCN files:
+To use the FTP endpoints for the GHCN files:
 
 ```bash
 NOAA_GHCN_BASE_URL=ftp://ftp.ncei.noaa.gov/pub/data/ghcn/v4 ./quickstart_tob.sh
 ```
 
-Manual equivalent:
-
-1. Build all binaries and helpers:
-
-```bash
-make
-```
-
-2. Download published inputs and station-history sources:
-
-```bash
-mkdir -p data
-curl -L -o data/ghcnm.tavg.latest.qcu.tar.gz https://www.ncei.noaa.gov/pub/data/ghcn/v4/ghcnm.tavg.latest.qcu.tar.gz
-curl -L -o data/ghcnm.tavg.latest.qcf.tar.gz https://www.ncei.noaa.gov/pub/data/ghcn/v4/ghcnm.tavg.latest.qcf.tar.gz
-curl -L -o data/phr.txt.zip https://www.ncei.noaa.gov/access/homr/file/phr.txt.zip
-curl -L -o data/mshr_enhanced.txt.zip https://www.ncei.noaa.gov/access/homr/file/mshr_enhanced.txt.zip
-```
-
-3. Reconstruct the local input/output workspace:
-
-```bash
-python3 src/python/qcu_to_inputs.py --qcu-tar data/ghcnm.tavg.latest.qcu.tar.gz --base data
-python3 src/python/qcf_to_outputs.py --qcf-tar data/ghcnm.tavg.latest.qcf.tar.gz --base data
-```
-
-4. Reconstruct the TOB history files (`data/intermediate/history/*.his`).
-
-NOAA does not publish these.  The reconstructor derives bit-exact CONUS
-histories from the QCU/QCF residuals (requires `bin/TOBMain` built with
-`TRIG_BACKEND=llvm-exact`, steps 1-3 done), documents observation-time months
-the residuals leave unconstrained from PHR, and takes the remaining `.his`
-fields from MSHR/PHR:
-
-```bash
-uv run python src/python/reconstruct_his.py
-```
-
-Add `--hints <dir>` once per prior-vintage hint set to consume a hint databank.
-A TOB regime can only be *proven* where QCF constrains it, so QCU months with no
-QCF value are beyond this vintage's reach.  Different archive vintages retain
-and remove different segments, so a month exposed in none of them here may be
-exposed in another; a hint databank imports what those vintages could prove, and
-widens coverage accordingly.  It does not make the result authoritative — what
-no vintage proves is documented from PHR/HOMR, which is documentation, not
-evidence.  See `src/python/README.md` for the CLI surface.
-
-5. Generate TOB-adjusted monthly data, then run PHA:
-
-```bash
-bin/TOBMain -p data/tob.properties
-bin/PHAMain -p data/tob.properties
-```
-
-6. Optional: verify that TOBMain output matches the reconstruction solutions
-   bit-exactly (not required for normal use; useful as an end-to-end gate):
-
-```bash
-uv run python src/python/verify_his.py --jobs 8
-```
-
-7. Optional: launch the viewer:
-
-```bash
-bin/PHAview \
-  --dir data/output/adj/tavg \
-  --ref data/output/qcf/tavg \
-  --ref2 data/intermediate/tob/tavg \
-  --history data/intermediate/history \
-  --inventory data/intermediate/station.inv
-```
-
-Then open: `http://localhost:8080/`
-
-For viewer usage details, see `src/go/README.md`.
+`docs/WORKFLOWS.md` gives the same sequence as separate commands.
 
 ## Documentation
 
-Detailed material has been split into `docs/`:
+- `docs/WORKFLOWS.md`: how to run the pipeline, the tests and Docker
+- `docs/CHANGES.md`: what this reconstruction changes in NOAA's sources
+- `docs/PROGRAMS.md`: what each program does
+- `docs/DATA_FORMATS.md`: file formats and the recovered PHA configuration
+- `src/python/README.md`: the Python helpers, and station-history recovery
+- `src/go/README.md`: the viewer webapp
 
-- `docs/README.md` (documentation index)
-- `docs/CHANGES.md` (reconstruction changes)
-- `docs/WORKFLOWS.md` (end-to-end workflows, tests, Docker)
-- `docs/PROGRAMS.md` (program reference)
-- `docs/DATA_FORMATS.md` (format reference)
-
-## Project Layout
+## Project layout
 
 - `src/f`: Fortran 77 sources
 - `src/f95`: Fortran 95 sources
 - `src/incl`: Fortran include files
 - `src/awk`: AWK scripts
 - `src/go`: Go viewer webapp
-- `src/python`: Python helper scripts
-- `src/test/resources/data`: test data fixtures
-- `build/`: test/runtime properties and generated logs
-- `obj/`: object/module build artifacts
-- `bin/`: compiled binaries/wrappers
+- `src/python`: Python helpers
+- `src/test/resources/data`: test fixtures
+- `build/`: test and runtime properties, and generated logs
+- `obj/`: object and module files (Git ignores these)
+- `bin/`: compiled programs (Git ignores these)

@@ -233,12 +233,15 @@ def write_properties(base: Path, begin_year: int, version: str, dry_run: bool) -
         #
         # SENTINELS. Every parameter here carries a falsification, not just an
         # optimisation. A sentinel is a station that reproduces the published
-        # QCF exactly and is fed only by neighbours that also do; if a value
-        # were wrong, such a station could not stay exact. An alternative is
-        # falsified when it changes a sentinel's changepoint set. The control
-        # matters as much as the test: rebuilding the network at the values
-        # below disturbs no sentinel, so the instrument is not firing on
-        # nothing. Do not "tidy" these.
+        # QCF exactly, and that has no station within 5 hops of it in the
+        # neighbour network which fails to do the same; nothing PHA feeds it,
+        # directly or indirectly, is itself in error, so a wrong value could
+        # not leave it exact. At the values below there are over 2,000 of them.
+        # One sentinel moving is not a result -- many moving is the signal, and
+        # that is what falsifies an alternative. The control matters as much as
+        # the test: rebuilding the network at the values below moves no
+        # sentinel, so the instrument is not firing on nothing. Do not "tidy"
+        # these.
         "pha.snht-threshold = 5",
         "pha.bic-penalty = bic",
         "pha.amploc-percent = 92",
