@@ -20,7 +20,7 @@ arithmetic.
 Cost order (lexicographic): hard_shorts (PHA segments with
 < HARD_SHORT_CONSTRAINTS constraint months -- physically unproducible by
 PHA, so they outrank deviants), deviants, tob_changes, pha_changepoints,
-soft_shorts (audit: segments < 18 QCF-visible months, regimes < 12 months --
+soft_shorts (audit: segments < 18 visible months, regimes < 12 months --
 a rarity prior, NOT a constraint; PHA can and does emit shorter segments).
 """
 
@@ -47,13 +47,8 @@ MISSING = -9999
 # stays a soft cost in the LAST tuple position, breaking ties only.  Do not
 # promote it, and do not read a short segment as evidence of a bad solve.
 #
-# Counted on VISIBLE months (_count_visible), which is not quite the month
-# population PHA measured: it differs from the TOB month count in 9.2% of
-# segments, on average by 3.0 months and usually by exactly 1, because the
-# X-flag union only approximates the months PHA processed and then deleted.
-# The approximation never changes an outcome here -- across 21,409 segments
-# there is no case of visible < 18 <= tob_months -- so this is a definitional
-# note, not a defect.
+# Counted on VISIBLE months (_count_visible): the QCU months PHA read, taken
+# from the QCU QC flags, which is the population ChangepointSize.f95 measures.
 MIN_SEG_VISIBLE = 18  # counted on visible months
 MIN_REGIME_MONTHS = 12  # soft prior: TOB regimes shorter than this are rare
 HARD_SHORT_CONSTRAINTS = 3  # segments with fewer constraints: vintage-skew tell
@@ -223,7 +218,7 @@ class Series:
     t_raw: List[int]  # qcu cents aligned to months
     q: List[int]  # qcf cents aligned to months
     qcf_only: List[int]  # month indices in qcf but not qcu (deviants upfront)
-    visible: set  # month indices where qcf non-missing or X-flagged
+    visible: set  # month indices PHA actually processed (see prepare_series)
     visible_sorted: List[int] = field(default_factory=list)  # sorted(visible)
 
 
@@ -231,7 +226,7 @@ def prepare_series(
     sid: str,
     qcu: Dict[Tuple[int, int], int],
     qcf: Dict[Tuple[int, int], int],
-    qcf_flags: Optional[Dict[Tuple[int, int], str]] = None,
+    qcu_flags: Dict[Tuple[int, int], str],
 ) -> Series:
     # QCF is derived from QCU (TOB + PHA applied to existing QCU points), so
     # its date set is always a subset of QCU's -- a month present in QCF but
@@ -251,11 +246,14 @@ def prepare_series(
     t_raw = [qcu[ym] for ym in common]
     q = [qcf[ym] for ym in common]
     qcf_only: List[int] = []
-    visible = {_mi(*ym) for ym in qcf}
-    if qcf_flags:
-        for ym, fl in qcf_flags.items():
-            if len(fl) >= 2 and fl[1] == "X":
-                visible.add(_mi(*ym))
+    # The months PHA actually processed.  ReadInputFiles.f95 nulls any month
+    # whose QC flag is set ("value = MISSING_REAL" when in_flags(2:2) /= ' '),
+    # so PHA sees QCU months MINUS the QC-flagged ones.  That is the population
+    # min_seg_length counts, so take it straight from the QCU flags.  An empty
+    # mapping therefore means "no month is QC-flagged", not "unknown".
+    visible = {
+        _mi(*ym) for ym in qcu if qcu_flags.get(ym, "   ")[1:2] in ("", " ")
+    }
     return Series(sid, months, t_raw, q, qcf_only, visible, sorted(visible))
 
 
@@ -576,7 +574,7 @@ def _cost_of(
 def solve_pha_only(
     qcu: Dict[Tuple[int, int], int],
     qcf: Dict[Tuple[int, int], int],
-    qcf_flags: Optional[Dict[Tuple[int, int], str]] = None,
+    qcu_flags: Dict[Tuple[int, int], str],
     sid: str = "",
 ) -> Solution:
     """PHA-only decomposition (non-CONUS stations; CONUS fast path).
@@ -585,7 +583,7 @@ def solve_pha_only(
     this wrapper attaches the pha-only evidence block (constraint runs plus a
     single 24HR pseudo-regime, see the proposal §3.2) on the way out.
     """
-    series = prepare_series(sid, qcu, qcf, qcf_flags)
+    series = prepare_series(sid, qcu, qcf, qcu_flags)
     sol = _solve_pha_only_impl(series, sid)
     sol.evidence = _pha_only_evidence(series, sol)
     return sol
@@ -670,7 +668,7 @@ def _solve_pha_only_impl(series: Series, sid: str) -> Solution:
     # Hard-short segments (< HARD_SHORT_CONSTRAINTS constraint months) rank
     # poorly in the search cost but do NOT break exactness: PHA's min-length
     # counts process months, and deletions can leave a legitimate segment
-    # with very few QCF-visible months.  Audit-flag them.
+    # with very few visible months.  Audit-flag them.
     for s in segs:
         if len(s.idxs) < HARD_SHORT_CONSTRAINTS:
             audits.append(f"hard-short-segment@{_ym(series.months[s.idxs[0]])}")
@@ -1775,8 +1773,8 @@ def solve_tob_station(
     qcu: Dict[Tuple[int, int], int],
     qcf: Dict[Tuple[int, int], int],
     bases: Sequence,
-    blend_fn: Optional[Callable] = None,
-    qcf_flags: Optional[Dict[Tuple[int, int], str]] = None,
+    blend_fn: Optional[Callable],
+    qcu_flags: Dict[Tuple[int, int], str],
     sid: str = "",
     hints: Optional[List[Tuple[Tuple[int, int, int], str]]] = None,
     vintage_hints: Optional[List[Tuple[Tuple[int, int, int], str]]] = None,
@@ -1802,7 +1800,7 @@ def solve_tob_station(
     cannot live at the tail of the search body); this wrapper attaches the
     evidence block from the chosen coordinate's basis on the way out.
     """
-    series = prepare_series(sid, qcu, qcf, qcf_flags)
+    series = prepare_series(sid, qcu, qcf, qcu_flags)
     sol = _solve_tob_station_impl(series, bases, blend_fn, sid, hints, None)
     if vintage_hints:
         hinted = _solve_tob_station_impl(

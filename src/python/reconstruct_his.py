@@ -230,7 +230,7 @@ def solve_station(
     qcf = ghcn_io.read_station_data(qcf_path)
 
     conus = is_conus_gate(sid, inv.lat, inv.lon)
-    sol = rs.solve_pha_only(raw.values, qcf.values, qcf.flags, sid=sid)
+    sol = rs.solve_pha_only(raw.values, qcf.values, raw.flags, sid=sid)
     kind = "pha-only"
     # Every station solves at its published station.inv coordinate (verified
     # across both data vintages).  MSHR data is used only for partial-month
@@ -292,7 +292,7 @@ def solve_station(
             qcf.values,
             inv_bases,
             blend_fn,
-            qcf.flags,
+            raw.flags,
             sid=sid,
             hints=hints,
             vintage_hints=vintage_hints,

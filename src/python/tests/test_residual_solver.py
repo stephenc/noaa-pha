@@ -94,7 +94,7 @@ class TestPhaOnly(unittest.TestCase):
             return s_old if (y, m) < (1980, 1) else 0.0
 
         qcu, qcf = synth(1, yms, lambda y, m: 0, s_fn)
-        sol = rs.solve_pha_only(qcu, qcf, sid="SYN1")
+        sol = rs.solve_pha_only(qcu, qcf, {}, sid="SYN1")
         self.assertTrue(sol.exact)
         self.assertEqual(len(sol.deviants), 0)
         self.assertEqual(len(sol.segments), 2)
@@ -107,7 +107,7 @@ class TestPhaOnly(unittest.TestCase):
     def test_trivial_zero_residual(self):
         yms = month_range(1960, 1, 1999, 12)
         qcu, qcf = synth(2, yms, lambda y, m: 0, lambda y, m: 0.0)
-        sol = rs.solve_pha_only(qcu, qcf, sid="SYN0")
+        sol = rs.solve_pha_only(qcu, qcf, {}, sid="SYN0")
         self.assertTrue(sol.exact)
         self.assertEqual(len(sol.segments), 1)
         self.assertTrue(sol.segments[0].s_lo <= 0.0 <= sol.segments[0].s_hi)
@@ -116,7 +116,7 @@ class TestPhaOnly(unittest.TestCase):
         yms = month_range(1950, 1, 1999, 12)
         qcu, qcf = synth(3, yms, lambda y, m: 0, lambda y, m: 0.0)
         qcf[(1970, 6)] += 3  # QCU revised after NOAA's run, say
-        sol = rs.solve_pha_only(qcu, qcf, sid="SYNSKEW")
+        sol = rs.solve_pha_only(qcu, qcf, {}, sid="SYNSKEW")
         self.assertEqual(len(sol.segments), 1)
         self.assertEqual([tuple(ym) for ym, _ in sol.deviants], [(1970, 6)])
         self.assertFalse(sol.exact)  # exact-modulo-deviants is the caller's call
@@ -133,7 +133,7 @@ class TestPhaOnly(unittest.TestCase):
             return s_old if (y, m) < (2002, 3) else 0.0  # 27 old / 23 new
 
         qcu, qcf = synth(4, yms, lambda y, m: 0, s_fn)
-        sol = rs.solve_pha_only(qcu, qcf, sid="SYNDP")
+        sol = rs.solve_pha_only(qcu, qcf, {}, sid="SYNDP")
         self.assertTrue(sol.exact)
         self.assertEqual(len(sol.segments), 2)
         for seg in sol.segments:
@@ -150,7 +150,7 @@ class TestPhaOnly(unittest.TestCase):
         qcu, qcf = synth(5, yms, lambda y, m: 0, s_fn)
         for ym in month_range(1998, 1, 1999, 12):  # PHA g-flagged the tail era
             del qcf[ym]
-        sol = rs.solve_pha_only(qcu, qcf, sid="SYNTAIL")
+        sol = rs.solve_pha_only(qcu, qcf, {}, sid="SYNTAIL")
         self.assertTrue(sol.exact)
         self.assertEqual(len(sol.segments), 1)
         self.assertIn("tail-anchor-fallback", sol.audits)
@@ -169,7 +169,7 @@ class TestQcfSubsetInvariant(unittest.TestCase):
         # A month present in QCF but absent from QCU cannot happen for real.
         qcf[(1993, 1)] = 1234
         with self.assertRaises(ValueError) as ctx:
-            rs.prepare_series("USQSWAP0001", qcu, qcf)
+            rs.prepare_series("USQSWAP0001", qcu, qcf, {})
         self.assertIn("1993-01", str(ctx.exception))
 
     def test_swapped_pair_raises(self):
@@ -182,7 +182,7 @@ class TestQcfSubsetInvariant(unittest.TestCase):
         # perturb one key on the (wrongly-passed) qcu side.
         qcu[(1996, 1)] = 5  # now qcf(=orig qcu) has a month qcu(=orig qcf) lacks
         with self.assertRaises(ValueError):
-            rs.prepare_series("USQSWAP0002", qcf, qcu)
+            rs.prepare_series("USQSWAP0002", qcf, qcu, {})
 
     def test_qcf_subset_ok(self):
         # Legitimate case: QCF a strict date-subset of QCU (later months
@@ -190,7 +190,7 @@ class TestQcfSubsetInvariant(unittest.TestCase):
         yms = month_range(1990, 1, 1994, 12)
         qcu, qcf = synth(11, yms, lambda y, m: OFF_17[m], lambda y, m: 0.0)
         del qcf[(1994, 12)]
-        series = rs.prepare_series("USQSUBSET01", qcu, qcf)
+        series = rs.prepare_series("USQSUBSET01", qcu, qcf, {})
         self.assertEqual(series.qcf_only, [])
         self.assertNotIn(rs._mi(1994, 12), series.months)
 
@@ -209,14 +209,14 @@ class TestDriverGate(unittest.TestCase):
 
         yms = month_range(1950, 1, 2009, 12)
         qcu, qcf = synth(20, yms, lambda y, m: self.QUARTERLY[m], lambda y, m: 0.0)
-        pha_sol = rs.solve_pha_only(qcu, qcf, sid="SYNQTR")
+        pha_sol = rs.solve_pha_only(qcu, qcf, {}, sid="SYNQTR")
         # fragmenting reading: nominally exact, structurally absurd
         self.assertGreater(len(pha_sol.segments), 100)
         self.assertFalse(driver.pha_fast_path_ok(pha_sol))
         basis = make_basis(
             yms, {"17HR": OFF_17, "QTHR": self.QUARTERLY, "24HR": OFF_24}
         )
-        tob_sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNQTR")
+        tob_sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNQTR")
         self.assertTrue(tob_sol.exact)
         self.assertEqual([r.code for r in tob_sol.regimes], ["QTHR"])
         self.assertEqual(len(tob_sol.segments), 1)
@@ -236,7 +236,7 @@ class TestRepairDistribute(unittest.TestCase):
 
         qcu, qcf = synth(21, yms, lambda y, m: 0, s_fn)
         qcu[(1980, 1)] += 14  # QCU revised after NOAA's run
-        sol = rs.solve_pha_only(qcu, qcf, sid="SYNADJ")
+        sol = rs.solve_pha_only(qcu, qcf, {}, sid="SYNADJ")
         self.assertEqual(len(sol.segments), 2)
         self.assertEqual([tuple(ym) for ym, _ in sol.deviants], [(1980, 1)])
         self.assertEqual(tuple(sol.segments[0].end), (1979, 12))
@@ -278,7 +278,7 @@ class TestManyChangepoints(unittest.TestCase):
 
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
         qcu, qcf = synth(40, yms, tobo_fn, s_fn)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNBRACKET")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNBRACKET")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
         codes = [r.code for r in sol.regimes]
         self.assertEqual(codes[0], "24HR")
@@ -297,7 +297,7 @@ class TestManyChangepoints(unittest.TestCase):
         s_fn = _step_s_fn([((1917, 1), fp32.f32(-0.2))] + breaks)
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
         qcu, qcf = synth(41, yms, lambda y, m: OFF_17[m], s_fn)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNNINE")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNNINE")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
         self.assertEqual([r.code for r in sol.regimes], ["17HR"])
         self.assertEqual(len(sol.segments), 10)
@@ -346,7 +346,7 @@ class TestFrontierCapAudit(unittest.TestCase):
         from unittest import mock
 
         qcu, qcf, basis = self._bracket_inputs()
-        series = rs.prepare_series("SYNCAP", qcu, qcf)
+        series = rs.prepare_series("SYNCAP", qcu, qcf, {})
         # A cap of 1 forces frontier pressure on this 8-changepoint shape.
         with mock.patch.object(rs, "PARETO_CAP", 1):
             res = rs._solve_with_basis(series, basis, True)
@@ -357,7 +357,7 @@ class TestFrontierCapAudit(unittest.TestCase):
         # Under the default cap this shape solves exactly with no frontier
         # pressure, so the audit must be absent -- the marker means something.
         qcu, qcf, basis = self._bracket_inputs()
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNCAP")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNCAP")
         self.assertTrue(sol.exact)
         self.assertNotIn("frontier-capped", sol.audits)
 
@@ -387,7 +387,7 @@ class TestDeviantClusters(unittest.TestCase):
 
         qcu, qcf = synth(50, yms, lambda y, m: OFF_17[m], s_fn)
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNGAPEDGE")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNGAPEDGE")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
         self.assertEqual([r.code for r in sol.regimes], ["17HR"])
         self.assertEqual(len(sol.segments), 3)
@@ -413,7 +413,7 @@ class TestDeviantClusters(unittest.TestCase):
         basis = make_basis(
             yms, {"17HR": OFF_17, "07HR": OFF_07, "15HR": OFF_15, "24HR": OFF_24}
         )
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNTRIAL")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNTRIAL")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
         self.assertEqual([r.code for r in sol.regimes], ["17HR", "07HR", "15HR"])
         self.assertEqual(tuple(sol.regimes[1].begin), (1985, 11, 1))
@@ -440,7 +440,7 @@ class TestDeviantClusters(unittest.TestCase):
         basis = make_basis(
             yms, {"17HR": OFF_17, "07HR": OFF_07, "23HR": OFF_15, "24HR": OFF_24}
         )
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNCONT")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNCONT")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
         self.assertEqual([r.code for r in sol.regimes], ["17HR", "07HR"])
         self.assertEqual(tuple(sol.regimes[1].begin), (1944, 4, 1))
@@ -457,7 +457,7 @@ class TestDeviantClusters(unittest.TestCase):
 
         qcu, qcf = synth(53, yms, lambda y, m: OFF_17[m], s_fn)
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNEDGE")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNEDGE")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
         self.assertEqual([r.code for r in sol.regimes], ["17HR"])
         self.assertEqual(len(sol.segments), 2)
@@ -473,7 +473,7 @@ class TestFlutterAndVacuousFlips(unittest.TestCase):
         sub-1e-5 endpoint gap (float32 endpoints quantize ~1.5e-8)."""
         import residual_solver as rs_mod
 
-        series = rs.prepare_series("SCAN", qcu, qcf)
+        series = rs.prepare_series("SCAN", qcu, qcf, {})
         run_iv = None
         for i in range(len(series.months)):
             iv = rs._psi(series.t_raw[i], series.q[i])
@@ -498,7 +498,7 @@ class TestFlutterAndVacuousFlips(unittest.TestCase):
         qcf[(1963, 9)] = q_f
         basis = make_basis(yms, {"17HR": OFF_17, "18HR": OFF_07, "24HR": OFF_24})
         # PHA-only view of the same signal (tobo == 0 via 24HR)
-        sol = rs.solve_pha_only(qcu, qcf, sid="SYNFLUT")
+        sol = rs.solve_pha_only(qcu, qcf, {}, sid="SYNFLUT")
         self.assertEqual(len(sol.segments), 1)
         self.assertEqual(
             [w for _ym, w in sol.deviants], ["flutter"], msg=str(sol.deviants)
@@ -521,7 +521,7 @@ class TestFlutterAndVacuousFlips(unittest.TestCase):
 
         qcu, qcf = synth(61, yms, tobo_fn, lambda y, m: s_era)
         basis = make_basis(yms, {"07HR": OFF_07, "15HR": OFF_15, "24HR": OFF_24})
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNTRIALKEEP")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNTRIALKEEP")
         self.assertTrue(sol.exact)
         self.assertEqual([r.code for r in sol.regimes], ["07HR", "15HR", "07HR"])
         self.assertFalse(any(w == "flutter" for _ym, w in sol.deviants))
@@ -537,7 +537,7 @@ class TestFlutterAndVacuousFlips(unittest.TestCase):
         s_fn = _step_s_fn([((1975, 3), fp32.f32(0.125))])
         qcu, qcf = synth(62, yms, lambda y, m: OFF_SS[m], s_fn)
         basis = make_basis(yms, {"00SS": OFF_SS, "00RS": OFF_SS, "24HR": OFF_24})
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNVACUOUS")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNVACUOUS")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:4]}")
         self.assertEqual(len(sol.regimes), 1, msg=str([r.code for r in sol.regimes]))
         self.assertEqual(len(sol.segments), 2)
@@ -582,7 +582,7 @@ class TestTwoBlendRepair(unittest.TestCase):
                     table[d] = {ym: 999}
             return table
 
-        sol = rs.solve_tob_station(qcu, qcf, [basis], blend_fn, sid="SYN2BLEND")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], blend_fn, {}, sid="SYN2BLEND")
         self.assertTrue(
             sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]} aud={sol.audits}"
         )
@@ -658,7 +658,7 @@ class TestCoordEscalation(unittest.TestCase):
         )
         qcu, qcf = synth(30, yms, lambda y, m: OFF_07[m], lambda y, m: 0.0)
         sol = rs.solve_tob_station(
-            qcu, qcf, [basis_inv, basis_mshr], None, sid="SYNESC"
+            qcu, qcf, [basis_inv, basis_mshr], None, {}, sid="SYNESC"
         )
         self.assertTrue(sol.exact)
         self.assertEqual(sol.coord_index, 1)
@@ -679,7 +679,7 @@ class TestCoordEscalation(unittest.TestCase):
         )
         qcu, qcf = synth(31, yms, lambda y, m: OFF_07[m], lambda y, m: 0.0)
         sol = rs.solve_tob_station(
-            qcu, qcf, [basis_inv, basis_mshr], None, sid="SYNESC2"
+            qcu, qcf, [basis_inv, basis_mshr], None, {}, sid="SYNESC2"
         )
         # nothing CLEANLY exact anywhere (a fragmented/alternating reading
         # may be nominally exact but carries hard- or soft-shorts) ->
@@ -708,7 +708,7 @@ class TestTobStation(unittest.TestCase):
             return 0.0
 
         qcu, qcf = synth(10, yms, tobo_fn, s_fn)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNTOB2")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNTOB2")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
         self.assertEqual([r.code for r in sol.regimes], ["17HR", "07HR"])
         self.assertEqual(tuple(sol.regimes[1].begin), (1975, 6, 1))
@@ -731,7 +731,7 @@ class TestTobStation(unittest.TestCase):
             return s1 if (y, m) < (1975, 6) else 0.0
 
         qcu, qcf = synth(11, yms, tobo_fn, s_fn)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNTOBCC")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNTOBCC")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
         self.assertEqual([r.code for r in sol.regimes], ["17HR", "07HR"])
         self.assertEqual(tuple(sol.regimes[1].begin), (1975, 6, 1))
@@ -747,7 +747,7 @@ class TestTobStation(unittest.TestCase):
 
         qcu, qcf = synth(12, yms, tobo_fn, lambda y, m: 0.0)
         qcf[(1980, 4)] -= 2
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNTOBSKEW")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNTOBSKEW")
         self.assertEqual([tuple(ym) for ym, _ in sol.deviants], [(1980, 4)])
         self.assertEqual([r.code for r in sol.regimes], ["17HR"])
         self.assertEqual(len(sol.segments), 1)
@@ -768,7 +768,7 @@ class TestTobStation(unittest.TestCase):
             return true_17[m]
 
         qcu, qcf = synth(13, yms, tobo_fn, lambda y, m: 0.0)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNKNIFE")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNKNIFE")
         # plain reading: single 17HR era, every July a deviant
         self.assertEqual([r.code for r in sol.regimes], ["17HR"])
         self.assertFalse(sol.exact)
@@ -795,7 +795,7 @@ class TestTobStation(unittest.TestCase):
             return OFF_17[m] if (y, m) < (1975, 6) else OFF_07[m]
 
         qcu, qcf = synth(14, yms, tobo_fn, lambda y, m: 0.0)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNEMIT")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNEMIT")
         self.assertTrue(sol.exact)
         regimes = [his_emit.Regime(begin=r.begin, obs_time=r.code) for r in sol.regimes]
         inv = ghcn_io.Inv("USQSYNTH000", 40.0, -90.0, 200.0, "SYNTH")
@@ -849,7 +849,9 @@ class TestRealData(unittest.TestCase):
     def test_noncon_calibration_sample(self):
         for sid in self._noncon_candidates():
             raw, qcf = self._load(sid)
-            sol = rs.solve_pha_only(raw.values, qcf.values, qcf.flags, sid=sid)
+            sol = rs.solve_pha_only(
+                raw.values, qcf.values, raw.flags, sid=sid
+            )
             n_dev = len(sol.deviants)
             print(
                 f"[noncon] {sid}: exact={sol.exact} segs={len(sol.segments)} "
@@ -906,7 +908,7 @@ class TestRealData(unittest.TestCase):
             )
             self.assertTrue(bases[0].station_adjusted)
             sol = rs.solve_tob_station(
-                raw.values, qcf.values, bases, None, qcf.flags, sid=sid
+                raw.values, qcf.values, bases, None, raw.flags, sid=sid
             )
         print(
             f"[conus] {sid}: exact={sol.exact} regimes="
@@ -1022,7 +1024,7 @@ class TestIfortBasisErrorStability(unittest.TestCase):
         yms, qcu, qcf = self._truth()
         bad = [(y, 6) for y in range(1955, 2005, 7)]  # 8 poisoned Junes
         basis = self._wedge_codes(yms, bad)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], sid="USQIFRT0001")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="USQIFRT0001")
         codes = {r.code for r in sol.regimes}
         self.assertNotIn("14HR", codes, "excursion regime invented")
         self.assertEqual(codes, {"16HR"})
@@ -1048,7 +1050,7 @@ class TestIfortBasisErrorStability(unittest.TestCase):
         yms, qcu, qcf = self._truth()
         bad = [(1963, 6)]  # one poisoned June: below KE_MIN_REPEATS
         basis = self._wedge_codes(yms, bad)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], sid="USQIFRT0002")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="USQIFRT0002")
         codes = {r.code for r in sol.regimes}
         self.assertNotIn("14HR", codes, "suspicious excursion not priced out")
         self.assertEqual(codes, {"16HR"})
@@ -1067,7 +1069,7 @@ class TestIfortBasisErrorStability(unittest.TestCase):
 
         qcu, qcf = synth(12, yms, tobo, lambda y, m: s_flat)
         basis = make_basis(yms, {"16HR": OFF_16, "15HR": off_15})
-        sol = rs.solve_tob_station(qcu, qcf, [basis], sid="USQIFRT0003")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="USQIFRT0003")
         self.assertTrue(sol.exact)
         self.assertEqual([d for d in sol.deviants if d[1] != "flutter"], [])
         codes = [r.code for r in sol.regimes]
@@ -1092,7 +1094,7 @@ class TestIfortBasisErrorStability(unittest.TestCase):
         qcu, qcf = synth(13, yms, tobo, lambda y, m: s_flat)
         basis = make_basis(yms, {"16HR": OFF_16, "14HR": by14_month})
 
-        no_hint = rs.solve_tob_station(qcu, qcf, [basis], sid="USQIFRT0004")
+        no_hint = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="USQIFRT0004")
         self.assertEqual(
             [tuple(d[0]) for d in no_hint.deviants],
             [(1980, 6)],
@@ -1104,6 +1106,8 @@ class TestIfortBasisErrorStability(unittest.TestCase):
             qcu,
             qcf,
             [basis],
+            None,
+            {},
             sid="USQIFRT0004",
             hints=[((1980, 6, 1), "14HR"), ((1980, 9, 1), "16HR")],
         )
@@ -1120,7 +1124,7 @@ class TestEvidenceCapture(unittest.TestCase):
         s_era = fp32.f32(-0.30)
         qcu, qcf = synth(70, yms, lambda y, m: OFF_17[m], lambda y, m: s_era)
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNEV1")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNEV1")
         self.assertTrue(sol.exact)
         return sol
 
@@ -1165,7 +1169,7 @@ class TestEvidenceCapture(unittest.TestCase):
 
         qcu, qcf = synth(71, yms, tobo_fn, lambda y, m: s_era)
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNEV2")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNEV2")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost} dev={sol.deviants[:5]}")
         ev = sol.evidence
         self.assertEqual([r["code"] for r in ev["regimes"]], ["17HR", "07HR"])
@@ -1179,7 +1183,7 @@ class TestEvidenceCapture(unittest.TestCase):
         s_old = fp32.f32(-0.42)
         s_fn = lambda y, m: s_old if (y, m) < (1980, 1) else 0.0  # noqa: E731
         qcu, qcf = synth(72, yms, lambda y, m: 0, s_fn)
-        sol = rs.solve_pha_only(qcu, qcf, sid="SYNEVP")
+        sol = rs.solve_pha_only(qcu, qcf, {}, sid="SYNEVP")
         self.assertIsNotNone(sol.evidence)
         ev = sol.evidence
         self.assertEqual(ev["kind"], "pha-only")
@@ -1191,7 +1195,7 @@ class TestEvidenceCapture(unittest.TestCase):
 
     def test_pha_only_evidence_empty_and_infeasible_paths(self):
         # Empty common months -> no-common-months return still carries evidence.
-        sol = rs.solve_pha_only({(1950, 1): 10}, {}, sid="SYNEVE")
+        sol = rs.solve_pha_only({(1950, 1): 10}, {}, {}, sid="SYNEVE")
         self.assertIsNotNone(sol.evidence)
         self.assertEqual(sol.evidence["kind"], "pha-only")
         self.assertEqual(sol.evidence["regimes"], [])
@@ -1296,8 +1300,8 @@ class TestPhase2VintageHints(unittest.TestCase):
         s_era = fp32.f32(-0.30)
         qcu, qcf = synth(80, yms, lambda y, m: OFF_17[m], lambda y, m: s_era)
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
-        a = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNZR")
-        b = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNZR", vintage_hints=[])
+        a = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNZR")
+        b = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNZR", vintage_hints=[])
         da, db = a.to_dict(), b.to_dict()
         da.pop("evidence", None)
         db.pop("evidence", None)
@@ -1314,11 +1318,11 @@ class TestPhase2VintageHints(unittest.TestCase):
 
         qcu, qcf = synth(81, yms, tobo_fn, lambda y, m: s_era)
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
-        base = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNVM")
+        base = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNVM")
         self.assertEqual([r.code for r in base.regimes], ["17HR", "07HR"])
         vh = [((1980, 1, 1), "07HR")]  # matches the true boundary/code
         out = rs.solve_tob_station(
-            qcu, qcf, [basis], None, sid="SYNVM", vintage_hints=vh
+            qcu, qcf, [basis], None, {}, sid="SYNVM", vintage_hints=vh
         )
         self.assertEqual([r.code for r in out.regimes], ["17HR", "07HR"])
         self.assertIsNone(out.hint_influenced)  # no tie was tipped
@@ -1334,8 +1338,8 @@ class TestPhase2VintageHints(unittest.TestCase):
 
         qcu, qcf = synth(82, yms, tobo_fn, lambda y, m: s_era)
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
-        series = rs.prepare_series("SYNRP", qcu, qcf, None)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNRP")
+        series = rs.prepare_series("SYNRP", qcu, qcf, {})
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNRP")
         self.assertTrue(sol.exact)
         repacked = rs._repackage_incumbent(series, basis, sol, [], None, "SYNRP")
         self.assertIsNotNone(repacked)
@@ -1380,12 +1384,12 @@ class TestPhase2VintageHints(unittest.TestCase):
         qcu, qcf = synth(90, yms, tobo, lambda y, m: fp32.f32(-0.3))
         basis = make_basis(yms, {"17HR": A, "18HR": B, "07HR": OFF_07, "24HR": OFF_24})
 
-        base = rs.solve_tob_station(qcu, qcf, [basis], None, sid="PA")
+        base = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="PA")
         self.assertEqual([r.code for r in base.regimes], ["17HR", "07HR"])
         self.assertIsNone(base.hint_influenced)
 
         hinted = rs.solve_tob_station(
-            qcu, qcf, [basis], None, sid="PA", vintage_hints=[((1950, 1, 1), "18HR")]
+            qcu, qcf, [basis], None, {}, sid="PA", vintage_hints=[((1950, 1, 1), "18HR")]
         )
         self.assertEqual([r.code for r in hinted.regimes], ["18HR", "07HR"])
         self.assertEqual(hinted.hint_influenced, {(1950, 1, 1)})
@@ -1406,8 +1410,8 @@ class TestPhase2VintageHints(unittest.TestCase):
         s_era = fp32.f32(-0.30)
         qcu, qcf = synth(83, yms, lambda y, m: OFF_17[m], lambda y, m: s_era)
         basis = make_basis(yms, {"17HR": OFF_17, "07HR": OFF_07, "24HR": OFF_24})
-        series = rs.prepare_series("SYNNO", qcu, qcf, None)
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="SYNNO")
+        series = rs.prepare_series("SYNNO", qcu, qcf, {})
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="SYNNO")
         # A hint far from any boundary/deviant -> retry returns the incumbent.
         out = rs._hinted_boundary_retry(
             series, basis, sol, [((1999, 1, 1), "07HR")], None, [], "SYNNO"

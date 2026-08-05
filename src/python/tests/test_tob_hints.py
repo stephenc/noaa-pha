@@ -517,7 +517,7 @@ class TestDeriveRealSolve(unittest.TestCase):
             qcu[(y, m)] = v
             qcf[(y, m)] = fp32.pha_qcf(v + OFF17[m], s_era)
         basis = self._basis(yms, {"17HR": OFF17, "24HR": OFF24})
-        sol = rs.solve_tob_station(qcu, qcf, [basis], None, sid="USQHOLE0001")
+        sol = rs.solve_tob_station(qcu, qcf, [basis], None, {}, sid="USQHOLE0001")
         self.assertTrue(sol.exact, msg=f"cost={sol.cost}")
         d = sol.to_dict()
         h = th.hints_from_solution("USQHOLE0001", d, qcu, qcf, base_name="data")
