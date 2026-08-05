@@ -20,7 +20,8 @@ arithmetic.
 Cost order (lexicographic): hard_shorts (PHA segments with
 < HARD_SHORT_CONSTRAINTS constraint months -- physically unproducible by
 PHA, so they outrank deviants), deviants, tob_changes, pha_changepoints,
-soft_shorts (audit: segments < 18 QCF-visible months, regimes < 12 months).
+soft_shorts (audit: segments < 18 QCF-visible months, regimes < 12 months --
+a rarity prior, NOT a constraint; PHA can and does emit shorter segments).
 """
 
 from __future__ import annotations
@@ -36,7 +37,24 @@ import fp32
 from fp32 import Interval
 
 MISSING = -9999
-MIN_SEG_VISIBLE = 18  # PHA pha.adjust.min-length, counted on visible months
+# Soft prior only: PHA does NOT enforce a minimum segment length.
+# pha.adjust.min-length gates whether a changepoint's adjustment is ESTIMATED
+# on a given pass (ChangepointSize.f95:418); before the final pass a short
+# segment is skipped and the changepoint survives into the output.  NOAA's own
+# QCF carries such segments -- proven on non-CONUS stations, where TOB is QCU
+# by construction, so qcf-qcu is their pure PHA output.
+# They are RARE, not impossible: order 0.2% of transitions.  That is why this
+# stays a soft cost in the LAST tuple position, breaking ties only.  Do not
+# promote it, and do not read a short segment as evidence of a bad solve.
+#
+# Counted on VISIBLE months (_count_visible), which is not quite the month
+# population PHA measured: it differs from the TOB month count in 9.2% of
+# segments, on average by 3.0 months and usually by exactly 1, because the
+# X-flag union only approximates the months PHA processed and then deleted.
+# The approximation never changes an outcome here -- across 21,409 segments
+# there is no case of visible < 18 <= tob_months -- so this is a definitional
+# note, not a defect.
+MIN_SEG_VISIBLE = 18  # counted on visible months
 MIN_REGIME_MONTHS = 12  # soft prior: TOB regimes shorter than this are rare
 HARD_SHORT_CONSTRAINTS = 3  # segments with fewer constraints: vintage-skew tell
 MAX_DEVIANTS_PER_SEGMENT = 2  # cap on vintage-skew conversions per segment
