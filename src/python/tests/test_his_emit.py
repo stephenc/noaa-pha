@@ -331,8 +331,9 @@ class TestMetadataHis(unittest.TestCase):
             self.assertEqual(rows[1].beg, (1980, 7, 1))
 
     def test_international_station_gets_file(self):
-        # MSHR carries international GHCN-D ids; south/west encode as
-        # negative degrees with positive minutes/seconds
+        # MSHR carries international GHCN-D ids.  West encodes as negative
+        # degrees with positive minutes (TOBMain SUBTRACTS them); south
+        # BORROWS to the degree below, because both readers ADD them.
         inv = ghcn_io.Inv("ASN00086017", -38.4931, 145.0, 10.0, "MELBOURNE")
         phr = [ghcn_io.PhrRec("ASN00086017", (1950, 1, 1), None, "0900")]
         with tempfile.TemporaryDirectory() as td:
@@ -340,8 +341,11 @@ class TestMetadataHis(unittest.TestCase):
             rows = his_emit.validate_his_file(path, warnings_out=[])
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].obs_time_raw, "24HR")
-            self.assertEqual(rows[0].lat_d, -38)
+            self.assertEqual(rows[0].lat_d, -39)
             self.assertGreaterEqual(rows[0].lat_m, 0)
+            # what actually matters: both Fortran readers recover the truth
+            self.assertAlmostEqual(rows[0].lat_tob, -38.4931, places=3)
+            self.assertAlmostEqual(rows[0].lat_pha, -38.4931, places=3)
 
     def test_no_records_no_file(self):
         with tempfile.TemporaryDirectory() as td:

@@ -343,36 +343,57 @@ class DmsCoord:
 def dms_quantize(lat: float, lon: float) -> DmsCoord:
     """Quantize to nearest arc-second, matching what a .his row can store.
 
-    Negative (west/south) coordinates: negative degrees, positive
-    minutes/seconds, and value = deg - min/60 - sec/3600 (the TOBMain
-    his_lon formula).  Values in (-1, 0) cannot be represented (the sign
-    lives on the degree field) - fail loud; no real station sits there.
-    """
-    if -1.0 < lon < 0.0:
-        raise ValueError(f"longitude {lon} in (-1,0): sign not representable")
-    if -1.0 < lat < 0.0:
-        raise ValueError(f"latitude {lat} in (-1,0): sign not representable")
+    Minutes and seconds are always positive; only the degree field carries a
+    sign.  Given that, one (deg, min, sec) triple satisfies each reader's
+    formula, so the encoding below is forced by the readers, not chosen.
 
+    Each hemisphere is encoded so that the READER'S OWN formula returns the
+    true value.  TOBMain SUBTRACTS the longitude minutes and ADDS the latitude
+    minutes (TOBMain.f95:501-502), so the two axes borrow in opposite
+    directions.  West and north are plain; east and south borrow.
+
+    Longitude in (-1, 0) needs no sign on the degree field, because west is
+    what subtraction already means: -0.21667 is 0deg 13' 00", which reads back
+    as 0 - 13/60 exactly.  63 stations in the v4 inventory sit there.
+
+    Latitude is BORROWED, because both readers ADD the latitude minutes
+    (TOBMain.f95:501, ReadInputFiles.f95:600) and the minute/second fields are
+    unsigned.  A south latitude is therefore written as the degree BELOW it
+    plus a positive remainder: -0.21667 is -1deg 47', and -33.5 is -34deg 30'.
+    Both read back exactly.  Writing -33deg 30' instead (the plain encoding)
+    would read back as -32.5, wrong by 2x the minutes for every southern
+    station, and would flip the sign outright in (-1, 0).
+    """
     south = lat < 0.0
     tot = int((abs(lat) * 3600.0) + 0.5)
-    lat_ad, rem = divmod(tot, 3600)
-    lat_m, lat_s = divmod(rem, 60)
-    lat_d = -lat_ad if south else lat_ad
+    if south:
+        # -ceil(tot/3600): the degree at or below the value, then the
+        # positive remainder up to it.  A whole degree does not borrow.
+        lat_d = -((tot + 3599) // 3600)
+        lat_m, lat_s = divmod(-lat_d * 3600 - tot, 60)
+    else:
+        lat_d, rem = divmod(tot, 3600)
+        lat_m, lat_s = divmod(rem, 60)
 
     west = lon < 0.0
     tot = int((abs(lon) * 3600.0) + 0.5)
-    lon_ad, rem = divmod(tot, 3600)
-    lon_m, lon_s = divmod(rem, 60)
-    lon_d = -lon_ad if west else lon_ad
-
-    if south:
-        qlat = lat_d - lat_m / 60.0 - lat_s / 3600.0
-    else:
-        qlat = lat_d + lat_m / 60.0 + lat_s / 3600.0
     if west:
-        qlon = lon_d - lon_m / 60.0 - lon_s / 3600.0
+        lon_d, rem = divmod(tot, 3600)
+        lon_d = -lon_d
+        lon_m, lon_s = divmod(rem, 60)
     else:
-        qlon = lon_d + lon_m / 60.0 + lon_s / 3600.0
+        # East BORROWS UP, the mirror of the latitude borrow: the reader
+        # SUBTRACTS the longitude minutes, so +15.58 is 16deg 25' 12",
+        # which reads back as 16 - 0.42 = 15.58.  A whole degree does not
+        # borrow.  Writing 15deg 34' 48" instead would read back as 14.42,
+        # wrong by 2x the minutes for every eastern station.
+        lon_d = (tot + 3599) // 3600
+        lon_m, lon_s = divmod(lon_d * 3600 - tot, 60)
+
+    # Borrowed, so the reader's own formula reconstructs it in both hemispheres.
+    qlat = lat_d + lat_m / 60.0 + lat_s / 3600.0
+    # Borrowed east, plain west, so TOBMain's own formula reconstructs both.
+    qlon = lon_d - lon_m / 60.0 - lon_s / 3600.0
     return DmsCoord(lat_d, lat_m, lat_s, lon_d, lon_m, lon_s, qlat, qlon)
 
 

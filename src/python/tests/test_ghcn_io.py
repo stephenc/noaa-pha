@@ -72,9 +72,40 @@ class TestDms(unittest.TestCase):
         self.assertEqual((dms.lat_d, dms.lat_m, dms.lat_s), (35, 5, 0))
         self.assertEqual((dms.lon_d, dms.lon_m, dms.lon_s), (-89, 58, 0))
 
-    def test_sign_edge_rejected(self):
-        with self.assertRaises(ValueError):
-            ghcn_io.dms_quantize(35.0, -0.5)
+    def test_west_longitude_below_one_degree_round_trips(self):
+        # TOBMain subtracts the longitude minutes, so a zero degree field
+        # still carries west.  63 v4 stations sit in (-1, 0).
+        dms = ghcn_io.dms_quantize(35.0, -0.5)
+        self.assertEqual((dms.lon_d, dms.lon_m, dms.lon_s), (0, 30, 0))
+        self.assertAlmostEqual(dms.qlon, -0.5)
+        self.assertAlmostEqual(
+            dms.lon_d - dms.lon_m / 60.0 - dms.lon_s / 3600.0, -0.5
+        )
+
+    def test_east_longitude_borrows(self):
+        # TOBMain SUBTRACTS the longitude minutes, so an east longitude is the
+        # degree ABOVE it minus a positive remainder.
+        for lon, want in ((15.58, (16, 25, 12)), (145.0, (145, 0, 0)),
+                          (0.5, (1, 30, 0))):
+            dms = ghcn_io.dms_quantize(35.0, lon)
+            self.assertEqual((dms.lon_d, dms.lon_m, dms.lon_s), want, lon)
+            self.assertAlmostEqual(
+                dms.lon_d - dms.lon_m / 60.0 - dms.lon_s / 3600.0, lon, places=4
+            )
+            self.assertAlmostEqual(dms.qlon, lon, places=4)
+
+    def test_south_latitude_borrows(self):
+        # Both readers ADD the latitude minutes, so a south latitude is the
+        # degree BELOW it plus a positive remainder.
+        for lat, want in ((-0.5, (-1, 30, 0)), (-33.5, (-34, 30, 0)),
+                          (-33.0, (-33, 0, 0)), (-0.21667, (-1, 47, 0))):
+            dms = ghcn_io.dms_quantize(lat, 35.0)
+            self.assertEqual((dms.lat_d, dms.lat_m, dms.lat_s), want, lat)
+            # the reader's own formula, in both Fortran readers
+            self.assertAlmostEqual(
+                dms.lat_d + dms.lat_m / 60.0 + dms.lat_s / 3600.0, lat, places=4
+            )
+            self.assertAlmostEqual(dms.qlat, lat, places=4)
 
 
 class TestHisRow(unittest.TestCase):
