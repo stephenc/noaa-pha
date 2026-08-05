@@ -123,15 +123,23 @@ def _his_row(
     return "".join(line)
 
 
-def _write_properties(path: Path, work: Path, log_name: str) -> None:
-    """Write a TOBMain properties file pointing into the temp workspace."""
+def _write_properties(
+    path: Path, work: Path, log_name: str, element: str = "tavg"
+) -> None:
+    """Write a TOBMain properties file pointing into the temp workspace.
+
+    `element` selects the bias table.  TOBUtils computes a separate table for
+    tmax, tmin and tavg (`compute_bias_tables`), and the tavg table is not the
+    table for either of the others, so an element run against the wrong table
+    gives offsets that match no real adjustment.
+    """
     props = {
         "pha.logger.filename": str(work / (log_name + ".pha.log")),
         "pha.logger.level": "WARN",
         "pha.logger.print-to-stdout": "false",
         "pha.logger.append-datestamp": "false",
         "pha.logger.rollover-datestamp": "false",
-        "pha.element": "tavg",
+        "pha.element": element,
         "pha.path.station-metadata": str(work / "station.inv"),
         "pha.path.station-history": str(work / "history") + "/",
         "tob.input-data-type": "raw",
@@ -140,8 +148,8 @@ def _write_properties(path: Path, work: Path, log_name: str) -> None:
         "tob.backfill-if-first-nonblank": "false",
         "tob.pause-on-blank-after-nonblank": "false",
         "tob.use-his-lat-lon": "false",
-        "tob.path.station-element-data-in": str(work / "raw" / "tavg") + "/",
-        "tob.path.station-element-data-out": str(work / "tob" / "tavg") + "/",
+        "tob.path.station-element-data-in": str(work / "raw" / element) + "/",
+        "tob.path.station-element-data-out": str(work / "tob" / element) + "/",
         "tob.logger.filename": str(work / (log_name + ".log")),
         "tob.logger.level": "WARN",
         "tob.logger.print-to-stdout": "false",
@@ -319,10 +327,17 @@ def _consensus(
 
 
 class BasisRunner:
-    def __init__(self, tob_bin: Path, scratch_root: Path, cache_root: Path):
+    def __init__(
+        self,
+        tob_bin: Path,
+        scratch_root: Path,
+        cache_root: Path,
+        element: str = "tavg",
+    ):
         self.tob_bin = Path(tob_bin)
         self.scratch_root = Path(scratch_root)
         self.cache_root = Path(cache_root)
+        self.element = element
         self.scratch_root.mkdir(parents=True, exist_ok=True)
         self.cache_root.mkdir(parents=True, exist_ok=True)
 
@@ -333,6 +348,9 @@ class BasisRunner:
         blob = json.dumps(
             {
                 "v": VERSION,
+                # The element picks the bias table, so two runs over one raw
+                # file under different elements are different results.
+                "element": self.element,
                 "coords": [[round(lat, 6), round(lon, 6)] for lat, lon in coords],
                 "transform": repr(transform),
                 "raw": [st.st_size, int(st.st_mtime)],
@@ -372,7 +390,10 @@ class BasisRunner:
                     line = "".join(chars)
                 out_lines.append(line)
         tf = tempfile.NamedTemporaryFile(
-            mode="w", dir=self.scratch_root, suffix=".raw.tavg", delete=False
+            mode="w",
+            dir=self.scratch_root,
+            suffix=f".raw.{self.element}",
+            delete=False,
         )
         tf.write("\n".join(out_lines) + "\n")
         tf.close()
@@ -399,8 +420,8 @@ class BasisRunner:
         )
         ok = False
         try:
-            (work / "raw" / "tavg").mkdir(parents=True)
-            (work / "tob" / "tavg").mkdir(parents=True)
+            (work / "raw" / self.element).mkdir(parents=True)
+            (work / "tob" / self.element).mkdir(parents=True)
             (work / "history").mkdir()
             inv_lines = []
             for fake_id, lat, lon, his_lines in fakes:
@@ -410,12 +431,15 @@ class BasisRunner:
                     f"{fake_id:<11s}{lat:9.4f}{lon:10.4f}{100.0:7.1f} FAKE"
                 )
                 # A fake station must copy the (possibly transformed) input.
-                _link_or_copy(raw_src, work / "raw" / "tavg" / f"{fake_id}.raw.tavg")
+                _link_or_copy(
+                    raw_src,
+                    work / "raw" / self.element / f"{fake_id}.raw.{self.element}",
+                )
                 with open(work / "history" / f"{fake_id}.his", "w") as fh:
                     fh.write("\n".join(his_lines) + "\n")
             (work / "station.inv").write_text("\n".join(inv_lines) + "\n")
             props = work / "tob.properties"
-            _write_properties(props, work, "tob")
+            _write_properties(props, work, "tob", self.element)
 
             res = subprocess.run(
                 [str(self.tob_bin), "-p", str(props)], capture_output=True, text=True
@@ -428,7 +452,9 @@ class BasisRunner:
 
             out: Dict[str, Dict[Tuple[int, int], int]] = {}
             for fake_id, _lat, _lon, _his in fakes:
-                tob_file = work / "tob" / "tavg" / f"{fake_id}.tob.tavg"
+                tob_file = (
+                    work / "tob" / self.element / f"{fake_id}.tob.{self.element}"
+                )
                 if not tob_file.exists():
                     raise RuntimeError(
                         f"TOBMain produced no output for {fake_id} "
@@ -600,13 +626,22 @@ def main() -> None:
         help="lat,lon (repeatable; default: inventory coord)",
     )
     ap.add_argument("--raw", default=None)
+    ap.add_argument(
+        "--element",
+        default="tavg",
+        choices=("tavg", "tmax", "tmin"),
+        help="Bias table to use; each element has its own",
+    )
     ap.add_argument("--inv", default="data/input/station.inv")
     ap.add_argument("--tob-bin", default="bin/TOBMain")
     ap.add_argument("--scratch", default=None)
     ap.add_argument("--cache", default="work/tob_basis")
     args = ap.parse_args()
 
-    raw = Path(args.raw or f"data/input/raw/tavg/{args.station}.raw.tavg")
+    raw = Path(
+        args.raw
+        or f"data/input/raw/{args.element}/{args.station}.raw.{args.element}"
+    )
     coords = []
     for c in args.coord:
         lat, lon = c.split(",")
@@ -615,7 +650,9 @@ def main() -> None:
         coords = [_read_inventory_coord(Path(args.inv), args.station)]
 
     scratch = Path(args.scratch or tempfile.gettempdir()) / "tob_basis_cli"
-    runner = BasisRunner(Path(args.tob_bin), scratch, Path(args.cache))
+    runner = BasisRunner(
+        Path(args.tob_bin), scratch, Path(args.cache), args.element
+    )
     t0 = time.time()
     bases = runner.get_bases(args.station, raw, coords)
     dt = time.time() - t0

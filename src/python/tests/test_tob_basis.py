@@ -119,6 +119,52 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(b2.anomalies, b.anomalies)
 
 
+class TestElement(unittest.TestCase):
+    """The element picks the bias table, so it must reach TOBMain and the cache.
+
+    TOBUtils computes a separate table for tmax, tmin and tavg, and the tavg
+    table is not the table for either of the others.  An element that did not
+    reach the properties file would silently give tavg offsets under a tmax
+    name, and a cache that did not separate elements would serve one for the
+    other.
+    """
+
+    def test_default_is_tavg(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            runner = BasisRunner(TOB_BIN, tmp / "scratch", tmp / "cache")
+            self.assertEqual(runner.element, "tavg")
+
+    def test_properties_carry_the_element(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            for element in ("tavg", "tmax", "tmin"):
+                path = tmp / f"{element}.properties"
+                tob_basis._write_properties(path, tmp / "work", "tob", element)
+                text = path.read_text()
+                self.assertIn(f"pha.element = {element}\n", text)
+                self.assertIn(f"raw/{element}/\n", text)
+                self.assertIn(f"tob/{element}/\n", text)
+
+    def test_cache_separates_elements(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            raw = tmp / "sample.raw.tavg"
+            raw.write_text("USC00000000 1950" + "     0   " * 12 + "\n")
+            # The key stats the binary, but never runs it, so a stub will do
+            # and the test does not need a build.
+            stub = tmp / "TOBMain"
+            stub.write_text("")
+            coords = [(40.0, -90.0)]
+            keys = {
+                element: BasisRunner(
+                    stub, tmp / "scratch", tmp / "cache", element
+                )._cache_key(raw, coords, None)
+                for element in ("tavg", "tmax", "tmin")
+            }
+            self.assertEqual(len(set(keys.values())), 3, keys)
+
+
 @unittest.skipUnless(HAVE_DATA, "bin/TOBMain or data/ not present")
 class TestIntegration(unittest.TestCase):
     @classmethod
