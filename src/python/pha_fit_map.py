@@ -5,9 +5,13 @@ A table of component sizes says whether the residual is clustered; a map says
 *where*, which is what actually points at a cause.  Mercator is the right
 projection here despite its area distortion: the station network is what it is,
 and preserving the familiar shape of coastlines makes a cluster recognisable as
-"the US Midwest" or "Scandinavia" at a glance.  Latitude is clipped to +/-80
-because the projection diverges at the poles and there is nothing above 80 but
-a handful of Arctic stations that would otherwise stretch the whole plot.
+"the US Midwest" or "Scandinavia" at a glance.
+
+Mercator diverges at the poles, so latitude is clipped to +/-85.  A station
+beyond that is drawn ON the clip line rather than dropped, because the polar
+stations are among the worst-fitting in the corpus and a map that hides them
+answers the wrong question.  Their plotted latitude is therefore approximate:
+the Antarctic cluster along the bottom edge sits at -90, not -85.
 
 Draw order matters: well-fitting stations are plotted first and badly-fitting
 ones last, so that in dense regions the problem stations are visible rather
@@ -32,7 +36,7 @@ matplotlib.use("Agg")  # headless: no display on this box
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 
-LAT_CLIP = 80.0
+LAT_CLIP = 85.0
 
 # Dark ground: ~70% of stations score near 1.0, so the plot is mostly green.
 # Against white that green washes out and the sparse dark-red failures -- the
@@ -45,7 +49,7 @@ SPINE = "#3a3f4b"
 GRID = "#262b36"
 
 REGIONS = {
-    "world": (-180.0, 180.0, -60.0, 80.0),
+    "world": (-180.0, 180.0, -90.0, 90.0),
     "conus": (-126.0, -66.0, 23.0, 51.0),
     "europe": (-12.0, 42.0, 34.0, 72.0),
 }
@@ -144,7 +148,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     step = 30 if args.region == "world" else 10
     ax.set_xticks([x for x in range(int(lon0), int(lon1) + 1) if x % step == 0])
     ax.set_xticklabels(["%d°" % x for x in ax.get_xticks()])
-    lat_ticks = [t for t in range(-80, 81, step) if lat0 <= t <= lat1]
+    # Ticks stop at the clip: a "-90" label on the clipped edge would
+    # misstate where the bottom row of points actually is.
+    lat_ticks = [
+        t for t in range(-90, 91, step) if lat0 <= t <= lat1 and abs(t) <= LAT_CLIP
+    ]
     ax.set_yticks([merc_y(t) for t in lat_ticks])
     ax.set_yticklabels(["%d°" % t for t in lat_ticks])
     ax.grid(True, color=GRID, linewidth=0.6)
